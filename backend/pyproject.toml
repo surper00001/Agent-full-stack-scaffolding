@@ -1,0 +1,152 @@
+[project]
+name = "agent-platform"
+version = "0.1.0"
+description = "企业级 AI Agent 后端平台 - 基于 LangChain + LangGraph + FastAPI"
+requires-python = ">=3.11"
+authors = [
+    { name = "dev", email = "dev@example.com" }
+]
+keywords = ["ai", "agent", "langchain", "langgraph", "fastapi", "llm"]
+
+dependencies = [
+    # Web 框架
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    # AI / Agent 框架
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint>=2.0.0",
+    # LLM 提供商
+    "langchain-openai>=0.2.0",
+    "langchain-anthropic>=0.2.0",
+    # 数据库
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "aiosqlite>=0.20.0",
+    # 向量数据库
+    "chromadb>=0.5.0",
+    "langchain-chroma>=0.2.0",
+    # 数据验证
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    # 异步与工具
+    "httpx>=0.28.0",
+    "python-multipart>=0.0.18",
+    # 日志与监测（全开源方案）
+    "loguru>=0.7.0",
+    "langfuse>=2.60.0",
+    "opentelemetry-api>=1.28.0",
+    "opentelemetry-sdk>=1.28.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
+    # 安全
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    # Redis (可选，用于缓存与会话)
+    "redis>=5.2.0",
+    "scalar-fastapi>=1.8.2",
+    "pyotp>=2.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+    "coverage>=7.6.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort (import 排序)
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking-imports
+]
+ignore = [
+    "E501",  # 行长度由 formatter 处理
+    "B008",  # 允许函数参数默认值中使用 FastAPI Depends
+    "B904",  # 允许在 except 中使用 raise from None
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "loguru",
+    "chromadb",
+    "langchain.*",
+    "langgraph.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "unit: 单元测试",
+    "integration: 集成测试，需要外部服务（数据库、LLM等）",
+    "slow: 慢速测试",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/__init__.py", "tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.28.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+    "coverage>=7.6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+only-include = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
