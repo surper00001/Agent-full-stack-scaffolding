@@ -20,8 +20,11 @@ if config.config_file_name is not None:
 # ---- 导入所有 ORM 模型，确保 metadata 中包含所有表 ----
 from src.db.base import Base  # noqa: E402
 import src.models.domain.tenant  # noqa: E402, F401
+import src.models.domain.user  # noqa: E402, F401
+import src.models.domain.refresh_token  # noqa: E402, F401
 import src.models.domain.conversation  # noqa: E402, F401
 import src.models.domain.agent  # noqa: E402, F401
+import src.models.domain.knowledge_base  # noqa: E402, F401
 
 # 目标元数据
 target_metadata = Base.metadata

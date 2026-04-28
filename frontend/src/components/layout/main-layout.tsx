@@ -25,8 +25,10 @@ export function MainLayout() {
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 overflow-y-auto bg-muted/30 p-6">
-          <Outlet />
+        <main className="app-scrollbar flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/30 p-6">
+          <div className="app-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

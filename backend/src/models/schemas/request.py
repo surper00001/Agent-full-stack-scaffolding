@@ -13,7 +13,16 @@ class CreateConversationRequest(BaseModel):
     """创建会话请求。"""
 
     title: str = Field(default="新对话", max_length=512, description="会话标题")
-    agent_type: str = Field(default="default", max_length=128, description="Agent 类型")
+    agent_type: str = Field(
+        default="default",
+        max_length=128,
+        description="Agent 类型: default(通用助手) | creative(创意导演·五人顾问团)",
+    )
+    knowledge_base_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description="绑定的知识库 ID，创建后该会话默认使用该知识库",
+    )
 
 
 class ChatMessageRequest(BaseModel):
@@ -21,6 +30,19 @@ class ChatMessageRequest(BaseModel):
 
     content: str = Field(..., min_length=1, max_length=65535, description="用户消息内容")
     stream: bool = Field(default=False, description="是否流式返回")
+    mode: str = Field(
+        default="agent",
+        pattern="^(ask|agent|plan)$",
+        description="对话模式: ask(纯问答无工具) | agent(ReAct+工具) | plan(Plan+ReAct+工具)",
+    )
+    plan_model: str | None = Field(
+        default=None, max_length=128,
+        description="规划模型名称，仅 plan 模式下生效，留空使用全局配置",
+    )
+    knowledge_base_id: str | None = Field(
+        default=None, max_length=64,
+        description="关联的知识库 ID，设置后 Agent 可在对话中检索该知识库",
+    )
 
 
 # ---- Agent 请求 ----

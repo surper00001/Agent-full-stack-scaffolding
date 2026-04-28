@@ -18,6 +18,8 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:8000",
         changeOrigin: true,
+        // 知识库大文件上传，避免开发代理先于客户端断开
+        timeout: 1200_000,
       },
     },
   },

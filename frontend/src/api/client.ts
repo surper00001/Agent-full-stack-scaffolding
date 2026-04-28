@@ -41,6 +41,11 @@ const client = axios.create({
 
 // ===== 请求拦截器 =====
 client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  // FormData 上传须由浏览器设置 multipart boundary，不能沿用默认 application/json
+  if (config.data instanceof FormData && config.headers) {
+    config.headers.delete("Content-Type");
+  }
+
   const token = localStorage.getItem(AUTH_TOKEN_KEY);
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;

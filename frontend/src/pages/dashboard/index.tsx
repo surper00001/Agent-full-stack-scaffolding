@@ -1,19 +1,10 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useAgentStore } from "@/stores";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { Bot, MessageSquare, Activity } from "lucide-react";
 
-/**
- * 仪表盘首页
- * 展示Agent总数、活跃数等关键指标概览
- */
 export default function DashboardPage() {
   const { agents, isLoading, fetchAgents } = useAgentStore();
 
@@ -21,31 +12,14 @@ export default function DashboardPage() {
     fetchAgents(1, 100);
   }, [fetchAgents]);
 
-  if (isLoading) {
-    return <LoadingSpinner size="lg" className="mt-24" />;
-  }
+  if (isLoading) return <LoadingSpinner size="lg" className="mt-24" />;
 
-  const activeAgents = agents.filter((a) => a.status === "active").length;
+  const activeAgents = agents.filter((a) => a.is_active).length;
 
   const stats = [
-    {
-      label: "Agent总数",
-      value: agents.length,
-      icon: Bot,
-      href: "/agents",
-    },
-    {
-      label: "活跃Agent",
-      value: activeAgents,
-      icon: Activity,
-      href: "/agents",
-    },
-    {
-      label: "对话记录",
-      value: "--",
-      icon: MessageSquare,
-      href: "/conversations",
-    },
+    { label: "Agent总数", value: agents.length, icon: Bot, href: "/agents" },
+    { label: "活跃Agent", value: activeAgents, icon: Activity, href: "/agents" },
+    { label: "对话记录", value: "--", icon: MessageSquare, href: "/conversations" },
   ];
 
   return (
@@ -55,15 +29,12 @@ export default function DashboardPage() {
         <p className="text-muted-foreground">AI Agent 平台运行概览</p>
       </div>
 
-      {/* 统计卡片 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {stats.map(({ label, value, icon: Icon, href }) => (
           <Link key={label} to={href}>
             <Card className="transition-shadow hover:shadow-md">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">
-                  {label}
-                </CardTitle>
+                <CardTitle className="text-sm font-medium">{label}</CardTitle>
                 <Icon className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -74,44 +45,25 @@ export default function DashboardPage() {
         ))}
       </div>
 
-      {/* 最近Agent快速列表 */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Agent 列表</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle className="text-lg">Agent 列表</CardTitle></CardHeader>
         <CardContent>
           {agents.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               暂无Agent，请前往
-              <Link to="/agents" className="mx-1 text-primary hover:underline">
-                Agent管理
-              </Link>
+              <Link to="/agents" className="mx-1 text-primary hover:underline">Agent管理</Link>
               创建
             </p>
           ) : (
             <div className="space-y-2">
               {agents.slice(0, 5).map((agent) => (
-                <Link
-                  key={agent.id}
-                  to={`/agents/${agent.id}`}
-                  className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent"
-                >
+                <Link key={agent.id} to={`/agents/${agent.id}`} className="flex items-center justify-between rounded-md border p-3 transition-colors hover:bg-accent">
                   <div>
                     <p className="font-medium">{agent.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {agent.description || "暂无描述"}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{agent.agent_type}</p>
                   </div>
-                  <span
-                    className={`rounded-full px-2 py-1 text-xs ${
-                      agent.status === "active"
-                        ? "bg-green-100 text-green-700"
-                        : agent.status === "error"
-                          ? "bg-red-100 text-red-700"
-                          : "bg-gray-100 text-gray-700"
-                    }`}
-                  >
-                    {agent.status}
+                  <span className={`rounded-full px-2 py-1 text-xs ${agent.is_active ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-700"}`}>
+                    {agent.is_active ? "启用" : "禁用"}
                   </span>
                 </Link>
               ))}

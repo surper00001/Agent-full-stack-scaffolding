@@ -1,9 +1,9 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import type { Conversation } from "@/types";
 import * as conversationsApi from "@/api/conversations";
 
 /**
- * 对话列表Hook — 手动触发的分页加载
+ * 对话列表 Hook — 手动触发的分页加载
  */
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -28,10 +28,11 @@ export function useConversations() {
   );
 
   const createConversation = useCallback(
-    async (agentId: string, title?: string) => {
+    async (title?: string, agentType = "default", knowledgeBaseId?: string | null) => {
       const response = await conversationsApi.createConversation({
-        agent_id: agentId,
-        title,
+        title: title || "新对话",
+        agent_type: agentType,
+        knowledge_base_id: knowledgeBaseId || undefined,
       });
       setConversations((prev) => [response.data, ...prev]);
       return response.data;
@@ -55,16 +56,18 @@ export function useConversations() {
 }
 
 /**
- * 流式消息Hook
- * 发送消息并以Generator方式逐token接收Agent响应
+ * 流式消息 Hook（简化版，供外部组合使用）
  */
 export function useStreamMessage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState("");
-  const abortRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(
-    async (conversationId: string, content: string): Promise<string> => {
+    async (
+      conversationId: string,
+      content: string,
+      signal?: AbortSignal,
+    ): Promise<string> => {
       setIsStreaming(true);
       setStreamContent("");
 
@@ -73,6 +76,7 @@ export function useStreamMessage() {
         for await (const chunk of conversationsApi.streamMessage(
           conversationId,
           content,
+          signal,
         )) {
           fullContent += chunk;
           setStreamContent(fullContent);
@@ -86,8 +90,8 @@ export function useStreamMessage() {
   );
 
   const cancelStream = useCallback(() => {
-    abortRef.current?.abort();
     setIsStreaming(false);
+    setStreamContent("");
   }, []);
 
   return { isStreaming, streamContent, sendMessage, cancelStream };

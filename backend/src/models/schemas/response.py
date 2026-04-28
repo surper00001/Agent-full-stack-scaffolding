@@ -49,6 +49,8 @@ class ConversationItem(BaseModel):
     agent_type: str
     message_count: int
     status: str
+    knowledge_base_id: str | None = None
+    knowledge_base_name: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -62,10 +64,59 @@ class MessageItem(BaseModel):
     conversation_id: str
     role: str
     content: str
-    token_count: int | None
+    token_count: int | None = None
+    metadata_: dict[str, Any] | None = Field(default=None, alias="metadata_")
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs: Any) -> "MessageItem":
+        if hasattr(obj, "metadata_") and isinstance(obj.metadata_, str):
+            try:
+                import json
+
+                parsed = json.loads(obj.metadata_) if obj.metadata_ else None
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            # 构造临时对象以便 from_attributes 正确序列化
+            class _MsgProxy:
+                pass
+
+            proxy = _MsgProxy()
+            for attr in ("id", "conversation_id", "role", "content", "token_count", "created_at"):
+                setattr(proxy, attr, getattr(obj, attr))
+            proxy.metadata_ = parsed
+            return super().model_validate(proxy, **kwargs)
+        return super().model_validate(obj, **kwargs)
+
+
+class ContextInfoResponse(BaseModel):
+    """上下文使用统计。"""
+
+    total_messages: int
+    total_tokens: int
+    max_context: int
+    usage_ratio: float
+    model: str = "default"
+
+
+class CursorPaginatedData(BaseModel, Generic[T]):
+    """基于游标的分页数据。"""
+
+    items: list[T] = Field(default_factory=list)
+    next_cursor: str | None = None
+    limit: int = 50
+
+
+class TokenUsageInfo(BaseModel):
+    """Token 使用详情。"""
+
+    used_tokens: int = 0
+    max_tokens: int = 0
+    strategy: str = ""
+    compressed_ratio: float = 0.0
+    has_summary: bool = False
 
 
 # ---- Agent 相关 ----

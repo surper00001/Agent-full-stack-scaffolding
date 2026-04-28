@@ -28,12 +28,28 @@ class LoginRequest(BaseModel):
 
     account: str = Field(description="用户名 / 手机号 / 邮箱")
     password: str = Field(description="密码")
+    code: str | None = Field(default=None, min_length=6, max_length=6, description="图形验证码（6位）")
 
 
 class RefreshRequest(BaseModel):
     """刷新令牌请求。"""
 
     refresh_token: str = Field(description="Refresh Token")
+
+
+class UpdateProfileRequest(BaseModel):
+    """更新个人信息请求。"""
+
+    username: str | None = Field(default=None, min_length=2, max_length=50, description="用户名")
+    email: str | None = Field(default=None, description="邮箱")
+    phone: str | None = Field(default=None, pattern=r"^1[3-9]\d{9}$", description="手机号")
+
+
+class ChangePasswordRequest(BaseModel):
+    """修改密码请求。"""
+
+    old_password: str = Field(description="旧密码")
+    new_password: str = Field(min_length=6, max_length=128, description="新密码")
 
 
 # ---- 响应 ----
@@ -55,6 +71,7 @@ class UserResponse(BaseModel):
     email: str | None
     is_active: bool
     is_verified: bool
+    role: str
     created_at: datetime
     updated_at: datetime
 

@@ -1,40 +1,34 @@
-/** Agent类型枚举 */
-export type AgentType = "chat" | "tool_use" | "rag" | "multi_agent";
-
-/** Agent状态 */
-export type AgentStatus = "active" | "inactive" | "error";
-
-/** Agent配置 */
-export interface AgentConfig {
-  temperature: number;
-  max_tokens: number;
-  model: string;
-  system_prompt: string;
-  tools: string[];
-}
-
-/** Agent实体 */
+/** Agent 实体 — 对齐后端 AgentConfigItem */
 export interface Agent {
   id: string;
-  tenant_id: string;
   name: string;
-  description: string;
-  type: AgentType;
-  status: AgentStatus;
-  config: AgentConfig;
+  agent_type: string;
+  system_prompt: string;
+  model_name: string;
+  temperature: number;
+  is_active: boolean;
   created_at: string;
-  updated_at: string;
 }
 
-/** 创建Agent请求 */
+/** 创建 Agent 请求 — 对齐后端 CreateAgentRequest */
 export interface CreateAgentRequest {
   name: string;
-  description: string;
-  type: AgentType;
-  config: Partial<AgentConfig>;
+  agent_type: string;
+  system_prompt: string;
+  model_name?: string;
+  temperature?: number;
+  max_tokens?: number;
+  tools?: string[];
 }
 
-/** 更新Agent请求 */
-export interface UpdateAgentRequest extends Partial<CreateAgentRequest> {
-  status?: AgentStatus;
+/** 更新 Agent 请求 — 对齐后端 UpdateAgentRequest */
+export interface UpdateAgentRequest {
+  name?: string;
+  agent_type?: string;
+  system_prompt?: string;
+  model_name?: string;
+  temperature?: number;
+  max_tokens?: number;
+  tools?: string[];
+  is_active?: boolean;
 }

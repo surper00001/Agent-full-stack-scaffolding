@@ -1,29 +1,64 @@
 import { useAuthStore, useUIStore } from "@/stores";
 import { Button } from "@/components/ui/button";
-import { Moon, Sun, LogOut, User } from "lucide-react";
+import { Moon, Sun, LogOut, User, Palette } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Link } from "react-router-dom";
 
-/**
- * 顶部导航栏
- * 包含：主题切换、用户信息、登出按钮
- */
 export function Header() {
-  const { user, logout } = useAuthStore();
-  const { theme, setTheme } = useUIStore();
+  const { user, isAdmin, logout } = useAuthStore();
+  const { theme, setTheme, colorTheme, setColorTheme } = useUIStore();
 
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
+  };
+
+  const toggleColor = () => {
+    setColorTheme(colorTheme === "emerald" ? "amber" : "emerald");
   };
 
   return (
     <header className="flex h-14 items-center justify-between border-b bg-background px-6">
       <div>
         <h2 className="text-sm font-medium text-muted-foreground">
-          AI Agent 管理平台
+          {isAdmin ? "ClipFlow 管理后台" : "ClipFlow"}
         </h2>
       </div>
 
-      <div className="flex items-center gap-3">
-        {/* 主题切换 */}
+      <div className="flex items-center gap-2">
+        {/* 色系切换 */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleColor}
+          title={colorTheme === "emerald" ? "切换至琥珀主题" : "切换至翡翠主题"}
+        >
+          <Palette className="h-4 w-4" />
+          <span className="sr-only">切换色系</span>
+        </Button>
+
+        {/* 色系指示点 */}
+        <div className="flex items-center gap-1 mr-1">
+          <button
+            onClick={() => setColorTheme("emerald")}
+            className={cn(
+              "h-3 w-3 rounded-full border-2 transition-all",
+              colorTheme === "emerald"
+                ? "border-primary scale-110 bg-emerald-600"
+                : "border-muted-foreground/30 bg-emerald-400/80",
+            )}
+          />
+          <button
+            onClick={() => setColorTheme("amber")}
+            className={cn(
+              "h-3 w-3 rounded-full border-2 transition-all",
+              colorTheme === "amber"
+                ? "border-primary scale-110 bg-amber-500"
+                : "border-muted-foreground/30 bg-amber-400/80",
+            )}
+          />
+        </div>
+
+        {/* 明暗切换 */}
         <Button variant="ghost" size="icon" onClick={toggleTheme}>
           {theme === "dark" ? (
             <Sun className="h-4 w-4" />
@@ -32,12 +67,20 @@ export function Header() {
           )}
         </Button>
 
-        {/* 用户信息 */}
+        {/* 用户信息及链接 */}
         {user && (
-          <div className="flex items-center gap-2 text-sm">
+          <Link
+            to="/profile"
+            className="flex items-center gap-2 text-sm rounded-md px-2 py-1 hover:bg-accent transition-colors"
+          >
             <User className="h-4 w-4 text-muted-foreground" />
-            <span className="text-muted-foreground">{user.name}</span>
-          </div>
+            <span className="text-muted-foreground hidden sm:inline">{user.username}</span>
+            {isAdmin && (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                管理员
+              </span>
+            )}
+          </Link>
         )}
 
         {/* 登出 */}

@@ -99,6 +99,13 @@ class VectorStoreError(AppException):
         super().__init__(message=message, code=50002, status_code=500, detail=detail)
 
 
+class DeletionError(AppException):
+    """资源删除失败（向量/文件/数据库不一致时抛出）。"""
+
+    def __init__(self, message: str = "删除资源失败", detail: Any = None) -> None:
+        super().__init__(message=message, code=50003, status_code=500, detail=detail)
+
+
 # ---- 认证异常 ----
 class UserAlreadyExistsError(AppException):
     """用户已存在。"""

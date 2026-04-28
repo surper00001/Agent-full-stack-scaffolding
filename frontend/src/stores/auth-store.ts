@@ -7,6 +7,7 @@ interface AuthStore {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isAdmin: boolean;
 
   /** 登录 — 成功后存储token并获取用户信息 */
   login: (params: LoginRequest) => Promise<void>;
@@ -16,6 +17,15 @@ interface AuthStore {
   initAuth: () => Promise<void>;
 }
 
+function deriveState(user: User | null) {
+  return {
+    user,
+    isAuthenticated: user !== null,
+    isAdmin: user?.role === "admin",
+    isLoading: false,
+  };
+}
+
 /**
  * 认证状态管理
  * 全局唯一的认证Store，管理登录/登出/会话恢复
@@ -23,6 +33,7 @@ interface AuthStore {
 export const useAuthStore = create<AuthStore>((set) => ({
   user: null,
   isAuthenticated: false,
+  isAdmin: false,
   isLoading: true,
 
   login: async (params: LoginRequest) => {
@@ -33,16 +44,19 @@ export const useAuthStore = create<AuthStore>((set) => ({
     localStorage.setItem(REFRESH_TOKEN_KEY, refresh_token);
 
     const userResponse = await authApi.getCurrentUser();
-    set({ user: userResponse.data, isAuthenticated: true, isLoading: false });
+    set(deriveState(userResponse.data));
   },
 
   logout: async () => {
     try {
-      await authApi.logout();
+      const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+      if (refreshToken) {
+        await authApi.logout(refreshToken);
+      }
     } finally {
       localStorage.removeItem(AUTH_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);
-      set({ user: null, isAuthenticated: false, isLoading: false });
+      set({ user: null, isAuthenticated: false, isAdmin: false, isLoading: false });
     }
   },
 
@@ -54,7 +68,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
     }
     try {
       const response = await authApi.getCurrentUser();
-      set({ user: response.data, isAuthenticated: true, isLoading: false });
+      set(deriveState(response.data));
     } catch {
       localStorage.removeItem(AUTH_TOKEN_KEY);
       localStorage.removeItem(REFRESH_TOKEN_KEY);

@@ -131,6 +131,35 @@ class LLMFactory:
         )
 
 
+    def create_plan_model(
+        self,
+        model_name: str | None = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        """创建规划专用模型（低温度，更确定性）。
+
+        优先使用 PLAN_MODEL_NAME 配置，未配置则复用执行模型。
+        """
+        settings = self._settings
+        plan_model = model_name or settings.plan_model_name or None
+        if plan_model:
+            return self.create_chat_model(
+                model_name=plan_model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs,
+            )
+        # 未配置独立 Plan Model，复用执行模型但降低温度
+        return self.create_chat_model(
+            model_name=None,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+
+
 @lru_cache
 def get_llm_factory() -> LLMFactory:
     """获取缓存的 LLM 工厂单例。"""

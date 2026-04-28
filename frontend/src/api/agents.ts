@@ -37,7 +37,7 @@ export async function updateAgent(
   id: string,
   payload: UpdateAgentRequest,
 ): Promise<ApiResponse<Agent>> {
-  const { data } = await client.patch(`${PATH}/${id}`, payload);
+  const { data } = await client.put(`${PATH}/${id}`, payload);
   return data;
 }
 

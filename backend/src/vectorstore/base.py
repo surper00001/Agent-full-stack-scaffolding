@@ -41,8 +41,19 @@ class BaseVectorStore(ABC):
         self,
         ids: list[str],
         collection_name: str = "default",
+        tenant_id: str = "default",
     ) -> bool:
         """按 ID 删除文档。"""
+        ...
+
+    @abstractmethod
+    async def delete_by_filter(
+        self,
+        where: dict[str, str],
+        collection_name: str = "default",
+        tenant_id: str = "default",
+    ) -> bool:
+        """按 metadata 条件删除（如 document_id）。"""
         ...
 
     @abstractmethod

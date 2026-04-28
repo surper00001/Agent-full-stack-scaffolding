@@ -1,7 +1,8 @@
 // API通用响应类型
 
-/** 统一API响应包装 */
+/** 统一API响应包装 — 对齐后端 APIResponse */
 export interface ApiResponse<T> {
+  code: number;
   data: T;
   message: string;
   success: boolean;

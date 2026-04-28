@@ -2,16 +2,14 @@
 Agent 管理 API。
 
 提供 Agent 配置的 CRUD 和 Agent 执行接口。
+（仅管理员可管理 Agent 配置）
 """
-
-import json
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_tenant
+from src.api.deps import CurrentUser, get_current_tenant, get_current_user, require_admin
 from src.db.session import get_db_session
-from src.models.domain.agent import AgentConfig
 from src.models.schemas.request import (
     CreateAgentRequest,
     PaginationParams,
@@ -27,9 +25,11 @@ router = APIRouter(prefix="/agents", tags=["Agent 管理"])
 async def create_agent(
     body: CreateAgentRequest,
     tenant_id: str = Depends(get_current_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    _admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[AgentConfigItem]:
-    """创建一个新的 Agent 配置。"""
+    """创建一个新的 Agent 配置（仅管理员）。"""
     service = AgentService(db)
     config = await service.create_agent_config(
         name=body.name,
@@ -48,22 +48,23 @@ async def create_agent(
 async def list_agents(
     pagination: PaginationParams = Depends(),
     tenant_id: str = Depends(get_current_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[PaginatedData[AgentConfigItem]]:
-    """获取当前租户的 Agent 配置列表。"""
+    """获取当前租户的 Agent 配置列表（所有认证用户可查看）。"""
     service = AgentService(db)
     skip = (pagination.page - 1) * pagination.page_size
     configs = await service.list_agent_configs(
         tenant_id=tenant_id, skip=skip, limit=pagination.page_size
     )
-    total = len(configs)  # 简化：实际应单独 count 查询
+    total = await service.count_agent_configs(tenant_id=tenant_id)
     return APIResponse(
         data=PaginatedData(
             items=[AgentConfigItem.model_validate(c) for c in configs],
             total=total,
             page=pagination.page,
             page_size=pagination.page_size,
-            pages=(total // pagination.page_size) + 1,
+            pages=max(1, (total + pagination.page_size - 1) // pagination.page_size),
         )
     )
 
@@ -72,9 +73,10 @@ async def list_agents(
 async def get_agent(
     agent_id: str,
     tenant_id: str = Depends(get_current_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[AgentConfigItem]:
-    """获取指定 Agent 的配置详情。"""
+    """获取指定 Agent 的配置详情（所有认证用户可查看）。"""
     service = AgentService(db)
     config = await service.get_agent_config(agent_id, tenant_id)
     return APIResponse(data=AgentConfigItem.model_validate(config))
@@ -85,9 +87,10 @@ async def update_agent(
     agent_id: str,
     body: UpdateAgentRequest,
     tenant_id: str = Depends(get_current_tenant),
+    _admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[AgentConfigItem]:
-    """更新指定 Agent 的配置（部分更新）。"""
+    """更新指定 Agent 的配置（仅管理员）。"""
     service = AgentService(db)
     updates = body.model_dump(exclude_none=True)
     config = await service.update_agent_config(agent_id, tenant_id, **updates)
@@ -98,9 +101,10 @@ async def update_agent(
 async def delete_agent(
     agent_id: str,
     tenant_id: str = Depends(get_current_tenant),
+    _admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse:
-    """软删除指定的 Agent 配置。"""
+    """软删除指定的 Agent 配置（仅管理员）。"""
     service = AgentService(db)
     await service.delete_agent_config(agent_id, tenant_id)
     return APIResponse(message="Agent 已删除")
@@ -111,6 +115,7 @@ async def run_agent(
     agent_id: str,
     user_input: str,
     tenant_id: str = Depends(get_current_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse:
     """

@@ -29,6 +29,12 @@ class Conversation(BaseModel):
     status: Mapped[str] = mapped_column(
         String(32), default="active", comment="状态: active | archived"
     )
+    user_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True, comment="所属用户 ID"
+    )
+    knowledge_base_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True, comment="绑定的知识库 ID"
+    )
 
     # 关联消息
     messages: Mapped[list["Message"]] = relationship(

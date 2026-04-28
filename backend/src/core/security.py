@@ -3,22 +3,18 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from src.core.config import get_settings
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
-    """对明文密码进行 bcrypt 哈希。"""
-    return _pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode()[:72], bcrypt.gensalt()).decode()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """验证明文密码与哈希值是否匹配。"""
-    return _pwd_context.verify(plain_password, hashed_password)
+    return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> tuple[str, int]:
@@ -58,7 +54,6 @@ def decode_access_token(token: str) -> dict | None:
 
 def generate_refresh_token() -> tuple[str, str]:
     """生成 Refresh Token（随机字符串），返回 (raw_token, token_hash)。"""
-    raw = secrets.token_urlsafe(64)
+    raw = secrets.token_urlsafe(32)
     token_hash = hash_password(raw)
     return raw, token_hash
-

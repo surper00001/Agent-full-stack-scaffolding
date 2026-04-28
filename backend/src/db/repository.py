@@ -7,7 +7,7 @@
 
 from typing import Any, Generic, TypeVar
 
-from sqlalchemy import Select, and_, delete, func, select
+from sqlalchemy import Select, and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.base import Base
@@ -110,3 +110,41 @@ class BaseRepository(Generic[ModelType]):
         await self._session.delete(instance)
         await self._session.flush()
         return True
+
+    async def hard_delete_by_filter(
+        self, tenant_id: str | None = None, **filters: Any
+    ) -> int:
+        """按条件物理删除（不区分 is_deleted）。"""
+        conditions: list[Any] = []
+        if tenant_id is not None:
+            conditions.append(self._model.tenant_id == tenant_id)
+        for field, value in filters.items():
+            if hasattr(self._model, field) and value is not None:
+                conditions.append(getattr(self._model, field) == value)
+        if not conditions:
+            return 0
+        stmt = delete(self._model).where(and_(*conditions))
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return int(result.rowcount or 0)
+
+    async def soft_delete_by_filter(
+        self, tenant_id: str | None = None, **filters: Any
+    ) -> int:
+        """按条件软删除。"""
+        conditions: list[Any] = [self._model.is_deleted == False]  # noqa: E712
+        if tenant_id is not None:
+            conditions.append(self._model.tenant_id == tenant_id)
+        for field, value in filters.items():
+            if hasattr(self._model, field) and value is not None:
+                conditions.append(getattr(self._model, field) == value)
+        if len(conditions) <= 1 and tenant_id is None and not filters:
+            return 0
+        stmt = (
+            update(self._model)
+            .where(and_(*conditions))
+            .values(is_deleted=True)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.flush()
+        return int(result.rowcount or 0)

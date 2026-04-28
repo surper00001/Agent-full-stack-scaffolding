@@ -1,28 +1,38 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { useUIStore } from "@/stores";
+import { useUIStore, useAuthStore } from "@/stores";
 import {
   LayoutDashboard,
   Bot,
   MessageSquare,
+  Building2,
   ChevronLeft,
+  User,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-/** 导航项配置 — 新增菜单在此添加即可 */
-const NAV_ITEMS = [
-  { to: "/", icon: LayoutDashboard, label: "仪表盘" },
-  { to: "/agents", icon: Bot, label: "Agent管理" },
-  { to: "/conversations", icon: MessageSquare, label: "对话记录" },
+/** 管理员导航项 */
+const ADMIN_NAV_ITEMS = [
+  { to: "/admin", icon: LayoutDashboard, label: "仪表盘" },
+  { to: "/admin/agents", icon: Bot, label: "Agent管理" },
+  { to: "/admin/conversations", icon: MessageSquare, label: "对话记录" },
+  { to: "/admin/tenant", icon: Building2, label: "租户管理" },
+  { to: "/profile", icon: User, label: "用户中心" },
 ];
 
-/**
- * 侧边栏导航
- * 支持折叠/展开，高亮当前路由
- */
+/** 普通用户导航项 */
+const USER_NAV_ITEMS = [
+  { to: "/chat", icon: Sparkles, label: "开始对话" },
+  { to: "/profile", icon: User, label: "用户中心" },
+];
+
 export function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useUIStore();
+  const { isAdmin } = useAuthStore();
   const location = useLocation();
+
+  const navItems = isAdmin ? ADMIN_NAV_ITEMS : USER_NAV_ITEMS;
 
   return (
     <aside
@@ -34,7 +44,9 @@ export function Sidebar() {
       {/* Logo区域 */}
       <div className="flex h-14 items-center justify-between border-b px-4">
         {sidebarOpen && (
-          <span className="text-lg font-bold text-primary">AgentHub</span>
+          <span className="text-lg font-bold text-primary">
+            {isAdmin ? "ClipFlow" : "ClipFlow"}
+          </span>
         )}
         <Button
           variant="ghost"
@@ -53,11 +65,13 @@ export function Sidebar() {
 
       {/* 导航菜单 */}
       <nav className="flex-1 space-y-1 p-2">
-        {NAV_ITEMS.map(({ to, icon: Icon, label }) => {
+        {navItems.map(({ to, icon: Icon, label }) => {
           const isActive =
-            to === "/"
-              ? location.pathname === "/"
-              : location.pathname.startsWith(to);
+            to === "/admin"
+              ? location.pathname === "/admin"
+              : to === "/chat"
+                ? location.pathname === "/chat"
+                : location.pathname.startsWith(to);
 
           return (
             <NavLink

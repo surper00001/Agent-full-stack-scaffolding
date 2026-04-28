@@ -70,6 +70,10 @@ class AgentService:
         """获取 Agent 配置列表。"""
         return await self._repo.list_all(tenant_id=tenant_id, skip=skip, limit=limit)
 
+    async def count_agent_configs(self, tenant_id: str) -> int:
+        """统计 Agent 配置总数。"""
+        return await self._repo.count(tenant_id=tenant_id)
+
     async def update_agent_config(
         self,
         agent_id: str,

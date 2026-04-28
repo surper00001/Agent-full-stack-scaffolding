@@ -1,11 +1,16 @@
 import client from "./client";
 import type {
   ApiResponse,
+  ContextInfoResponse,
+  ContextUsageSnapshot,
   Conversation,
   CreateConversationRequest,
+  CursorMessagesResponse,
   Message,
   PaginatedResponse,
   PaginationParams,
+  StreamEvent,
+  TokenUsageStats,
 } from "@/types";
 import { API_BASE_URL, AUTH_TOKEN_KEY } from "@/lib/constants";
 
@@ -19,7 +24,7 @@ export async function getConversations(
   return data;
 }
 
-/** 获取单个对话 */
+/** 获取单个对话（含消息列表） */
 export async function getConversation(
   id: string,
 ): Promise<ApiResponse<Conversation>> {
@@ -40,33 +45,75 @@ export async function deleteConversation(id: string): Promise<void> {
   await client.delete(`${PATH}/${id}`);
 }
 
+/** 获取对话消息列表 */
+export async function getMessages(
+  conversationId: string,
+): Promise<ApiResponse<Message[]>> {
+  const { data } = await client.get(`${PATH}/${conversationId}/messages`);
+  return data;
+}
+
+/** 获取上下文使用统计 */
+export async function getContextInfo(
+  conversationId: string,
+): Promise<ApiResponse<ContextInfoResponse>> {
+  const { data } = await client.get(`${PATH}/${conversationId}/context-info`);
+  return data;
+}
+
+/** 基于游标获取消息分页 */
+export async function getMessagesCursor(
+  conversationId: string,
+  cursor?: string | null,
+  limit = 50,
+  direction: "backward" | "forward" = "backward",
+): Promise<ApiResponse<CursorMessagesResponse>> {
+  const { data } = await client.get(`${PATH}/${conversationId}/messages/cursor`, {
+    params: { cursor, limit, direction },
+  });
+  return data;
+}
+
 /**
- * 流式发送消息 — 使用fetch原生ReadableStream
- * 支持Agent实时响应推流，逐token返回
+ * 流式发送消息 — 增强版，支持结构化事件。
+ *
+ * 产出 StreamEvent: delta | tool_call | tool_result | done
  */
-export async function* streamMessage(
+export async function* streamMessageV2(
   conversationId: string,
   content: string,
-): AsyncGenerator<string, void, unknown> {
+  signal?: AbortSignal,
+  mode: "ask" | "agent" | "plan" = "agent",
+  planModel?: string | null,
+  knowledgeBaseId?: string | null,
+): AsyncGenerator<StreamEvent, void, unknown> {
   const token = localStorage.getItem(AUTH_TOKEN_KEY);
   const response = await fetch(
-    `${API_BASE_URL}${PATH}/${conversationId}/messages`,
+    `${API_BASE_URL}${PATH}/${conversationId}/send`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ content, stream: true }),
+      body: JSON.stringify({
+        content,
+        stream: true,
+        mode,
+        plan_model: planModel || null,
+        knowledge_base_id: knowledgeBaseId || null,
+      }),
+      signal,
     },
   );
 
   if (!response.ok) {
-    throw new Error(`消息发送失败: ${response.status}`);
+    const err = await response.json().catch(() => ({}));
+    throw new Error((err as { message?: string }).message || `请求失败 (${response.status})`);
   }
 
   const reader = response.body?.getReader();
-  if (!reader) return;
+  if (!reader) throw new Error("不支持流式响应");
 
   const decoder = new TextDecoder();
   let buffer = "";
@@ -80,19 +127,58 @@ export async function* streamMessage(
     buffer = lines.pop() || "";
 
     for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        const chunk = line.slice(6).trim();
-        if (chunk === "[DONE]") return;
-        yield chunk;
+      if (!line.startsWith("data: ")) continue;
+      const raw = line.slice(6).trim();
+      if (!raw || raw === "[DONE]") continue;
+
+      try {
+        const payload = JSON.parse(raw);
+
+        if (payload.rag_context) {
+          yield { type: "rag_context", data: payload.rag_context };
+        } else if (payload.done) {
+          yield {
+            type: "done",
+            data: {
+              conversation_id: payload.conversation_id,
+              token_usage: payload.token_usage as TokenUsageStats,
+              context_usage: payload.context_usage as ContextUsageSnapshot,
+            },
+          };
+        } else if (payload.plan) {
+          yield { type: "plan", data: payload.plan };
+        } else if (payload.file) {
+          yield { type: "file", data: payload.file };
+        } else if (payload.tool_calls && payload.status === "tool_call") {
+          yield { type: "tool_call", data: payload.tool_calls };
+        } else if (payload.tool_results && payload.status === "tool_result") {
+          yield { type: "tool_result", data: payload.tool_results };
+        } else if (payload.status === "tool_call") {
+          yield { type: "tool_call", data: payload.tool_calls || [] };
+        } else if (payload.delta) {
+          yield { type: "delta", data: payload.delta };
+        }
+      } catch {
+        if (raw && raw !== "[DONE]") {
+          yield { type: "delta", data: raw };
+        }
       }
     }
   }
 }
 
-/** 获取对话消息列表 */
-export async function getMessages(
+/**
+ * 简单流式 — 向后兼容，仅产出文本块。
+ * @deprecated 推荐使用 streamMessageV2 以获取工具调用和上下文信息。
+ */
+export async function* streamMessage(
   conversationId: string,
-): Promise<ApiResponse<Message[]>> {
-  const { data } = await client.get(`${PATH}/${conversationId}/messages`);
-  return data;
+  content: string,
+  signal?: AbortSignal,
+): AsyncGenerator<string, void, unknown> {
+  for await (const event of streamMessageV2(conversationId, content, signal)) {
+    if (event.type === "delta") {
+      yield event.data as string;
+    }
+  }
 }

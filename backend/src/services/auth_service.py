@@ -42,8 +42,8 @@ class AuthService:
         settings = get_settings()
 
         secret = pyotp.random_base32()
-        totp = pyotp.TOTP(secret, interval=settings.verification_code_ttl)
-        code = totp.now()
+        totp = pyotp.TOTP(secret, digits=6, interval=settings.verification_code_ttl)
+        code = totp.now().zfill(6)
 
         redis = await get_redis()
         key = f"verify_code:{method}:{target}"
@@ -52,21 +52,23 @@ class AuthService:
         return code
 
     async def _verify_code(self, target: str, method: str, code: str) -> bool:
-        """验证验证码是否有效。"""
+        """验证验证码是否有效 — 优先匹配 captcha，其次 send-code。"""
         settings = get_settings()
         redis = await get_redis()
-        key = f"verify_code:{method}:{target}"
-        secret = await redis.get(key)
 
-        if secret is None:
-            return False
+        # 尝试两种 key：captcha（图片验证码）和 verify_code（邮箱/短信）
+        for prefix in ("captcha", "verify_code"):
+            key = f"{prefix}:{target}"
+            secret = await redis.get(key)
+            if secret is None:
+                continue
 
-        totp = pyotp.TOTP(secret, interval=settings.verification_code_ttl)
-        if not totp.verify(code):
-            return False
+            totp = pyotp.TOTP(secret, digits=6, interval=settings.verification_code_ttl)
+            if totp.verify(code):
+                await redis.delete(key)
+                return True
 
-        await redis.delete(key)
-        return True
+        return False
 
     # ---- 注册 ----
 
@@ -80,9 +82,9 @@ class AuthService:
         tenant_id: str = "default",
     ) -> User:
         """用户注册：先验码，再检查唯一性，最后创建用户。"""
+        # 与前端 captcha ?target= 保持一致（邮箱优先，其次手机）
         verify_target = email or phone or ""
-        verify_method = "email" if email else "sms"
-        if not await self._verify_code(verify_target, verify_method, code):
+        if not await self._verify_code(verify_target, "captcha", code):
             raise InvalidVerificationCodeError()
 
         await self._check_unique(username, phone, email)
@@ -110,8 +112,12 @@ class AuthService:
 
     # ---- 登录（双 Token） ----
 
-    async def login(self, account: str, password: str) -> dict:
-        """用户登录：验证凭证 → 签发 Access Token + Refresh Token。"""
+    async def login(self, account: str, password: str, code: str | None = None) -> dict:
+        """用户登录：先验图形验证码 → 再验凭证 → 签发双 Token。"""
+        if code:
+            if not await self._verify_code(account, "captcha", code):
+                raise InvalidVerificationCodeError()
+
         user = await self._find_by_account(account)
         if user is None or not verify_password(password, user.hashed_password):
             raise InvalidCredentialsError()
@@ -126,7 +132,7 @@ class AuthService:
 
         # Access Token（JWT，短有效期）
         access_token, expires_in = create_access_token(
-            data={"sub": user.id, "username": user.username},
+            data={"sub": user.id, "username": user.username, "role": user.role},
         )
 
         # Refresh Token（随机字符串，长有效期）
@@ -217,6 +223,57 @@ class AuthService:
     async def _get_by_email(self, email: str) -> User | None:
         users = await self._user_repo.list_all(email=email)
         return users[0] if users else None
+
+    # ---- 个人信息管理 ----
+
+    async def update_profile(
+        self,
+        user_id: str,
+        username: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+    ) -> User:
+        """更新用户个人信息。"""
+        user = await self._user_repo.get_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError()
+
+        if username is not None:
+            existing = await self._get_by_username(username)
+            if existing and existing.id != user_id:
+                raise UserAlreadyExistsError("用户名", username)
+            user.username = username
+
+        if email is not None:
+            existing = await self._get_by_email(email)
+            if existing and existing.id != user_id:
+                raise UserAlreadyExistsError("邮箱", email)
+            user.email = email
+
+        if phone is not None:
+            existing = await self._get_by_phone(phone)
+            if existing and existing.id != user_id:
+                raise UserAlreadyExistsError("手机号", phone)
+            user.phone = phone
+
+        return await self._user_repo.update(user)
+
+    async def change_password(
+        self,
+        user_id: str,
+        old_password: str,
+        new_password: str,
+    ) -> None:
+        """修改用户密码。"""
+        user = await self._user_repo.get_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError()
+
+        if not verify_password(old_password, user.hashed_password):
+            raise InvalidCredentialsError()
+
+        user.hashed_password = hash_password(new_password)
+        await self._user_repo.update(user)
 
     async def _find_by_account(self, account: str) -> User | None:
         stmt = select(User).where(

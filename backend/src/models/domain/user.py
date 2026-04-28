@@ -29,6 +29,13 @@ class User(BaseModel):
     is_verified: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, comment="是否已验证"
     )
+    role: Mapped[str] = mapped_column(
+        String(16), default="user", nullable=False, comment="角色: admin | user"
+    )
+
+    @property
+    def is_admin(self) -> bool:
+        return self.role == "admin"
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, username={self.username})>"
+        return f"<User(id={self.id}, username={self.username}, role={self.role})>"
