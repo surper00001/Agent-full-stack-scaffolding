@@ -101,24 +101,34 @@ def _item_to_citation(item: dict[str, Any]) -> CitationItem:
 
 
 def format_context_text(citations: list[CitationItem]) -> str:
-    """将引用列表格式化为 LLM 可读的上下文文本。"""
+    """将引用列表格式化为 LLM 可读的上下文文本。
+
+    对于表格类型 chunk，在 Markdown 表格后附加 HTML 源码以保证大模型能按原格式复现表格。
+    """
     parts: list[str] = []
     for i, c in enumerate(citations):
+        # 来源行包含完整的可追溯信息
         source_info = f"[来源{i + 1}] {c.source}"
         if c.section_title:
             source_info += f" > {c.section_title}"
         source_info += f" (第{c.page}页, 匹配度:{c.score:.0%})"
-        parts.append(f"{source_info}\n{c.content}")
+
+        # 内容主体
+        body = c.content
+        parts.append(f"{source_info}\n{body}")
+
     return "\n\n---\n\n".join(parts)
 
 
 def build_system_rag_prompt(kb_name: str, context_text: str) -> str:
-    """构建注入 system prompt 的 RAG 段落。"""
+    """构建注入 system prompt 的 RAG 段落，包含表格还原指引。"""
     if not context_text.strip():
         return ""
     return (
         f"\n\n## 知识库检索结果（自动）\n"
-        f"以下是从知识库「{kb_name}」检索到的相关内容，请优先基于这些信息回答，并标注来源。\n\n"
+        f"以下是从知识库「{kb_name}」检索到的相关内容，请优先基于这些信息回答，并标注来源。\n"
+        f"若内容中包含 Markdown 表格，请保持原始表格结构输出；"
+        f"每个来源末尾的[来源N]编号必须在对应用户可见的回答中引用。\n\n"
         f"{context_text}"
     )
 

@@ -26,7 +26,7 @@ export default function AdminDashboardPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">仪表盘</h1>
-        <p className="text-muted-foreground">ClipFlow 短视频创作平台运行概览</p>
+        <p className="text-muted-foreground">ClipFlow AI 智能工作台运行概览</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

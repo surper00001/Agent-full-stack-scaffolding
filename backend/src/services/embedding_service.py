@@ -76,11 +76,61 @@ class EmbeddingService:
         batch_size: int = 32,
         strategy: EmbeddingStrategy | None = None,
     ) -> list[list[float]]:
-        """批量文档向量化——走 document 侧格式化。"""
+        """批量文档向量化——走 document 侧格式化，优先从 Redis 缓存读取。"""
         active_strategy = strategy or self._strategy
         formatted = [active_strategy.format_document(t) for t in texts]
+
+        # 检查 Redis 缓存
+        if self._settings.kb_embedding_cache_enabled and len(formatted) > 0:
+            try:
+                from src.services.redis_service import RedisService
+                redis = await RedisService.get_instance()
+                if redis.available:
+                    cached, missing = await redis.get_embeddings_batch(
+                        self._model_name, formatted
+                    )
+                    if not missing:
+                        # 全部命中缓存
+                        return [cached[i] for i in range(len(formatted))]
+                    if cached:
+                        # 部分命中——仅计算缺失的
+                        missing_texts = [formatted[i] for i in sorted(missing)]
+                        extra = active_strategy.encode_kwargs_for_document()
+                        missing_vectors = await self._encode(missing_texts, batch_size, extra)
+                        # 写入缺失的缓存
+                        await redis.set_embeddings_batch(
+                            self._model_name, missing_texts, missing_vectors,
+                            ttl=self._settings.kb_embedding_cache_ttl,
+                        )
+                        # 组装结果
+                        result = []
+                        miss_iter = iter(missing_vectors)
+                        for i in range(len(formatted)):
+                            if i in cached:
+                                result.append(cached[i])
+                            else:
+                                result.append(next(miss_iter))
+                        return result
+            except Exception as e:
+                logger.debug("Redis embedding cache check failed: {}", e)
+
         extra = active_strategy.encode_kwargs_for_document()
-        return await self._encode(formatted, batch_size, extra)
+        vectors = await self._encode(formatted, batch_size, extra)
+
+        # 写入 Redis 缓存
+        if self._settings.kb_embedding_cache_enabled and vectors:
+            try:
+                from src.services.redis_service import RedisService
+                redis = await RedisService.get_instance()
+                if redis.available:
+                    await redis.set_embeddings_batch(
+                        self._model_name, formatted, vectors,
+                        ttl=self._settings.kb_embedding_cache_ttl,
+                    )
+            except Exception as e:
+                logger.debug("Redis embedding cache write failed: {}", e)
+
+        return vectors
 
     async def embed_texts(
         self,

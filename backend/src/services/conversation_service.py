@@ -64,7 +64,7 @@ class ConversationService:
     async def create_conversation(
         self,
         title: str = "新对话",
-        agent_type: str = "default",
+        agent_type: str = "general",
         tenant_id: str = "default",
         user_id: str | None = None,
         knowledge_base_id: str | None = None,

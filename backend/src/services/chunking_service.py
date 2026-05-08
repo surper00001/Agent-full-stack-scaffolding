@@ -469,38 +469,50 @@ class ChunkingService:
             section_path=blocks[0].section_path,
         )
 
+    _SPECIAL_CONTENT_MAX_CHARS = 1800  # 留空间给 _build_embed_text 添加的元数据头
+
+    @classmethod
+    def _truncate_content_for_embed(cls, content: str) -> str:
+        """截断过长内容，保证嵌入时加上元数据头后不超出模型上限。"""
+        if len(content) <= cls._SPECIAL_CONTENT_MAX_CHARS:
+            return content
+        truncated = content[:cls._SPECIAL_CONTENT_MAX_CHARS]
+        # 尝试在句末/段末截断
+        for sep in ("\n\n", "。", ". ", "\n", " "):
+            idx = truncated.rfind(sep)
+            if idx > cls._SPECIAL_CONTENT_MAX_CHARS // 2:
+                return truncated[: idx + len(sep)] + f"\n... (内容已截断，共 {len(content)} 字符)"
+        return truncated + f"... (内容已截断，共 {len(content)} 字符)"
+
     def _enrich_special_content(self, block: StructuredBlock) -> str:
         """为特殊块（表格/图片/代码）生成增强的内容描述，便于向量检索。"""
         parts: list[str] = []
 
         if block.block_type == "table":
-            # 表格：标题 + 结构化描述 + Markdown 内容
             if block.table_caption:
                 parts.append(f"[表格标题] {block.table_caption}")
             if block.section_title:
                 parts.append(f"[所在章节] {block.section_title}")
-            parts.append(f"[表格内容]\n{block.content}")
+            parts.append(f"[表格内容]\n{self._truncate_content_for_embed(block.content)}")
 
         elif block.block_type == "image":
-            # 图片：描述 + OCR + 标题
             if block.image_caption:
                 parts.append(f"[图片说明] {block.image_caption}")
             if block.image_description:
                 parts.append(f"[图片描述] {block.image_description}")
             if block.content and block.content != "[图片]" and "OCR" not in block.content:
-                parts.append(f"[图片文字] {block.content}")
+                parts.append(f"[图片文字] {self._truncate_content_for_embed(block.content)}")
             elif block.content and "OCR" in block.content:
-                parts.append(block.content)
+                parts.append(self._truncate_content_for_embed(block.content))
 
         elif block.block_type == "code":
-            # 代码块：提取函数/类名作为关键词
-            parts.append(block.content)
+            parts.append(self._truncate_content_for_embed(block.content))
             functions = re.findall(r"(?:def|class|function|const|let|var)\s+(\w+)", block.content)
             if functions:
                 parts.append(f"[代码符号] {', '.join(functions)}")
 
         else:
-            parts.append(block.content)
+            parts.append(self._truncate_content_for_embed(block.content))
 
         return "\n".join(parts)
 

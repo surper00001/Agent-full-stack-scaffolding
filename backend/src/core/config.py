@@ -225,8 +225,8 @@ class Settings(BaseSettings):
         description="默认分块重叠（字符数）",
     )
     kb_parent_chunk_size: int = Field(
-        default=2000, alias="KB_PARENT_CHUNK_SIZE",
-        description="父块大小（用于扩展上下文）",
+        default=1500, alias="KB_PARENT_CHUNK_SIZE",
+        description="父块大小（用于扩展上下文，需为 embed 元数据头预留空间）",
     )
     kb_parent_chunk_overlap: int = Field(
         default=100, alias="KB_PARENT_CHUNK_OVERLAP",
@@ -265,7 +265,7 @@ class Settings(BaseSettings):
         description="MMR 平衡系数（越大越偏向相关性）",
     )
     kb_supported_extensions: list[str] = Field(
-        default=[".pdf", ".docx", ".doc", ".txt", ".md", ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"],
+        default=[".pdf", ".docx", ".doc", ".xlsx", ".xls", ".txt", ".md", ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"],
         alias="KB_SUPPORTED_EXTENSIONS",
         description="支持上传的文件扩展名",
     )
@@ -284,6 +284,22 @@ class Settings(BaseSettings):
     kb_page_ocr_fallback: bool = Field(
         default=True, alias="KB_PAGE_OCR_FALLBACK",
         description="PDF 某页无文本时是否对该页整页渲染后 OCR",
+    )
+    kb_embedding_cache_enabled: bool = Field(
+        default=True, alias="KB_EMBEDDING_CACHE_ENABLED",
+        description="是否启用 Redis 缓存 Embedding 向量",
+    )
+    kb_search_cache_enabled: bool = Field(
+        default=True, alias="KB_SEARCH_CACHE_ENABLED",
+        description="是否启用 Redis 缓存搜索结果",
+    )
+    kb_search_cache_ttl: int = Field(
+        default=300, alias="KB_SEARCH_CACHE_TTL",
+        description="搜索结果缓存过期时间（秒），默认 5 分钟",
+    )
+    kb_embedding_cache_ttl: int = Field(
+        default=86400, alias="KB_EMBEDDING_CACHE_TTL",
+        description="Embedding 缓存过期时间（秒），默认 24 小时",
     )
     kb_embedding_device: str = Field(
         default="auto", alias="KB_EMBEDDING_DEVICE",

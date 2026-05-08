@@ -611,9 +611,26 @@ class KnowledgeBaseService:
         rerank: bool = True,
         filters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """搜索知识库——委托 RetrievalPipeline 执行完整检索链路。"""
+        """搜索知识库——委托 RetrievalPipeline 执行完整检索链路。
+
+        支持 Redis 缓存：相同查询在 TTL 内直接返回缓存结果。
+        """
         kb = await self.get_kb(kb_id, tenant_id)
-        return await self.retrieval.search(
+
+        # 检查 Redis 缓存
+        if self._settings.kb_search_cache_enabled:
+            try:
+                from src.services.redis_service import RedisService
+                redis = await RedisService.get_instance()
+                if redis.available:
+                    cached = await redis.get_search_result(kb_id, query, top_k)
+                    if cached:
+                        logger.debug("Search cache hit: kb={}, query={}", kb_id, query[:50])
+                        return cached
+            except Exception as e:
+                logger.debug("Redis cache check failed: {}", e)
+
+        result = await self.retrieval.search(
             kb=kb,
             query=query,
             tenant_id=tenant_id,
@@ -623,6 +640,21 @@ class KnowledgeBaseService:
             filters=filters,
             doc_repo=self._doc_repo,
         )
+
+        # 写入 Redis 缓存
+        if self._settings.kb_search_cache_enabled:
+            try:
+                from src.services.redis_service import RedisService
+                redis = await RedisService.get_instance()
+                if redis.available:
+                    await redis.set_search_result(
+                        kb_id, query, top_k, result,
+                        ttl=self._settings.kb_search_cache_ttl,
+                    )
+            except Exception as e:
+                logger.debug("Redis cache write failed: {}", e)
+
+        return result
 
     async def reindex_kb(self, kb_id: str, tenant_id: str) -> dict[str, Any]:
         """重建知识库向量索引——换 Embedding 模型后必须执行。"""

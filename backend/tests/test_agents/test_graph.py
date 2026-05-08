@@ -32,13 +32,13 @@ def mock_llm() -> AsyncMock:
 async def test_build_graph(mock_llm: AsyncMock) -> None:
     """测试图构建成功。"""
     tools = get_default_tools()
-    builder = AgentGraphBuilder(llm=mock_llm, tools=tools)
+    builder = AgentGraphBuilder(execute_llm=mock_llm, tools=tools)
     graph = builder.build()
 
     assert graph is not None
     # 验证图中有 agent 和 tools 两个节点
     nodes = graph.get_graph().nodes
-    assert "agent" in nodes
+    assert "executor" in nodes
     assert "tools" in nodes
 
 
@@ -47,7 +47,7 @@ async def test_build_graph(mock_llm: AsyncMock) -> None:
 async def test_graph_invoke_basic(mock_llm: AsyncMock) -> None:
     """测试图基本调用（无需工具的场景）。"""
     tools = get_default_tools()
-    builder = AgentGraphBuilder(llm=mock_llm, tools=tools)
+    builder = AgentGraphBuilder(execute_llm=mock_llm, tools=tools)
     graph = builder.with_system_prompt("你是一个客服助手").build()
 
     result = await graph.ainvoke(
@@ -78,20 +78,20 @@ async def test_max_iterations_protection(mock_llm: AsyncMock) -> None:
         )
     )
 
-    builder = AgentGraphBuilder(llm=mock_llm, tools=get_default_tools())
+    builder = AgentGraphBuilder(execute_llm=mock_llm, tools=get_default_tools())
+    builder._enable_planning = False  # 跳过 planner，直接测 executor 的迭代上限
     graph = builder.build()
 
     result = await graph.ainvoke(
         {
             "messages": [HumanMessage(content="计算 1+1")],
-            "iteration_count": AgentGraphBuilder.MAX_ITERATIONS,  # 已达上限
+            "iteration_count": AgentGraphBuilder.MAX_ITERATIONS,
             "tenant_id": "test",
             "metadata": {},
         },
         config={"configurable": {"thread_id": "test-thread-2"}},
     )
 
-    # 应该返回终止消息
     final_msg = result["messages"][-1]
     assert "已达到最大执行步骤" in final_msg.content
 

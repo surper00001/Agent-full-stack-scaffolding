@@ -6,8 +6,7 @@ KBDocument  → 上传的源文件
 KBChunk     → 文档分块（文本/表格/图片）
 """
 
-from sqlalchemy import ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import ForeignKey, Integer, JSON, String, Text, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import BaseModel
@@ -91,7 +90,7 @@ class KBDocument(BaseModel):
         Text, nullable=True, comment="错误信息"
     )
     metadata_: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True, comment="扩展元数据（作者、标题、OCR 结果等）"
+        JSON, nullable=True, comment="扩展元数据（作者、标题、OCR 结果等）"
     )
 
     knowledge_base: Mapped["KnowledgeBase"] = relationship(
@@ -140,7 +139,7 @@ class KBChunk(BaseModel):
         String(256), nullable=True, comment="向量数据库中的 ID"
     )
     metadata_: Mapped[dict | None] = mapped_column(
-        JSONB, nullable=True, comment="位置信息: {bbox, section, table_html, image_path, ...}"
+        JSON, nullable=True, comment="位置信息: {bbox, section, table_html, image_path, ...}"
     )
 
     document: Mapped["KBDocument"] = relationship("KBDocument", back_populates="chunks")

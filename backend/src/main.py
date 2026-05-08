@@ -143,17 +143,36 @@ async def lifespan(app: FastAPI):
     try:
         from src.db.session import AsyncSessionLocal as _AgentSession
         from src.models.domain.agent import AgentConfig
-        from src.agents.prompts import CREATIVE_ADVISOR_PROMPT
+        from src.agents.prompts import CREATIVE_ADVISOR_PROMPT, GENERAL_AGENT_PROMPT
         from sqlalchemy import select
 
         async with _AgentSession() as seed_session:
+            # 综合智能体（默认）
+            stmt = select(AgentConfig).where(
+                AgentConfig.agent_type == "general",
+                AgentConfig.is_deleted == False,  # noqa: E712
+            )
+            result = await seed_session.execute(stmt)
+            if result.scalar_one_or_none() is None:
+                agent = AgentConfig(
+                    name="综合智能助手",
+                    agent_type="general",
+                    system_prompt=GENERAL_AGENT_PROMPT,
+                    model_name="deepseek-chat",
+                    temperature=0.7,
+                    tenant_id="default",
+                )
+                seed_session.add(agent)
+                await seed_session.commit()
+                logger.info("   默认智能体「综合智能助手」已创建")
+
+            # 创意导演（专业智能体）
             stmt = select(AgentConfig).where(
                 AgentConfig.agent_type == "creative",
                 AgentConfig.is_deleted == False,  # noqa: E712
             )
             result = await seed_session.execute(stmt)
-            existing_agent = result.scalar_one_or_none()
-            if existing_agent is None:
+            if result.scalar_one_or_none() is None:
                 agent = AgentConfig(
                     name="创意导演·五人顾问团",
                     agent_type="creative",
@@ -223,6 +242,11 @@ async def lifespan(app: FastAPI):
     from src.core.redis import close_redis
 
     await close_redis()
+
+    # 刷新 Langfuse 追踪数据
+    from src.monitoring.tracer import get_monitor
+
+    get_monitor().flush()
 
 
 def create_app() -> FastAPI:

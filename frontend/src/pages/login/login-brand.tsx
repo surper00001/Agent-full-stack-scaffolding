@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Film, Play, Layers, Palette } from "lucide-react";
+import { Sparkles, Brain, Library, Puzzle } from "lucide-react";
 
 const FEATURES = [
-  { icon: Play, label: "AI 智能脚本生成，多风格适配" },
-  { icon: Layers, label: "分镜与拍摄清单自动输出" },
-  { icon: Palette, label: "专业级后期制作建议" },
+  { icon: Brain, label: "多领域智能问答与深度推理" },
+  { icon: Library, label: "知识库检索与文档智能分析" },
+  { icon: Puzzle, label: "可扩展的专业智能体系统" },
 ];
 
 export function LoginBrand() {
@@ -31,23 +31,23 @@ export function LoginBrand() {
       <div className="relative z-10">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/[0.08]">
-            <Film className="h-5 w-5 text-white" />
+            <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-white">ClipFlow</h1>
-            <p className="text-[11px] text-zinc-500">Professional Video Creation</p>
+            <p className="text-[11px] text-zinc-500">AI-Powered Workspace</p>
           </div>
         </div>
 
         <div className="mt-12">
           <h2 className="text-3xl font-bold leading-tight text-white lg:text-4xl lg:leading-tight">
-            专业级
+            智能 AI
             <br />
-            视频创作工作台
+            创作工作台
           </h2>
           <p className="mt-4 max-w-sm text-sm leading-relaxed text-zinc-400">
-            从选题策划到成片输出，AI 驱动每一个创作环节。
-            脚本、分镜、拍摄清单、后期方案 — 一站式完成。
+            从知识检索到内容创作，AI 驱动每一个工作环节。
+            多智能体协作、文档分析、智能问答 — 一站式完成。
           </p>
         </div>
       </div>

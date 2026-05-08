@@ -53,7 +53,7 @@ export default function ConversationsPage() {
                       {conv.title || "未命名对话"}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                      {conv.messages.length} 条消息 ·{" "}
+                      {conv.messages?.length ?? 0} 条消息 ·{" "}
                       {new Date(conv.created_at).toLocaleString("zh-CN")}
                     </p>
                   </div>

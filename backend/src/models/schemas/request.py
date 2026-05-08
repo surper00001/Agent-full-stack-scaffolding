@@ -14,9 +14,9 @@ class CreateConversationRequest(BaseModel):
 
     title: str = Field(default="新对话", max_length=512, description="会话标题")
     agent_type: str = Field(
-        default="default",
+        default="general",
         max_length=128,
-        description="Agent 类型: default(通用助手) | creative(创意导演·五人顾问团)",
+        description="Agent 类型: general(综合智能助手) | creative(创意导演·五人顾问团) | 可扩展自定义类型",
     )
     knowledge_base_id: str | None = Field(
         default=None,

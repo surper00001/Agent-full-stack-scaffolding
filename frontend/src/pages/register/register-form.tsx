@@ -104,7 +104,7 @@ export function RegisterForm() {
     <div className="flex flex-col justify-center p-8 lg:p-12 animate-fade-in-up">
       <div className="mx-auto w-full max-w-sm">
         <h2 className="text-2xl font-bold tracking-tight mb-1">创建账户</h2>
-        <p className="text-muted-foreground mb-8">加入 AI 短视频创作平台</p>
+        <p className="text-muted-foreground mb-8">加入 AI 智能创作平台</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <Field icon={User} label="用户名" required>

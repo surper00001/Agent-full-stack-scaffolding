@@ -1,11 +1,9 @@
 """
 LLM 回调模块。
 
-提供统一的 LangChain 回调处理器，用于：
-- Token 用量统计
-- LLM 调用耗时记录
-- 成本估算
-- 日志输出
+提供统一的 LangChain 回调处理器：
+- TokenUsageCallback — Token 用量统计与成本估算
+- build_trace_callbacks() — 构建完整回调列表 + Langfuse 追踪元数据
 """
 
 import time
@@ -67,3 +65,43 @@ class TokenUsageCallback(BaseCallbackHandler):
             "completion_tokens": self.completion_tokens,
             "total_cost": self.total_cost,
         }
+
+
+def build_trace_callbacks(
+    session_id: str | None = None,
+    user_id: str | None = None,
+    tags: list[str] | None = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    """构建 LangChain 回调列表和 Langfuse 追踪元数据。
+
+    返回 (callbacks, metadata) 元组：
+    - callbacks: [TokenUsageCallback, (Langfuse CallbackHandler)]
+    - metadata: 包含 langfuse_session_id, langfuse_user_id, langfuse_tags
+      将其传入 LangGraph config["metadata"] 即可自动归因
+
+    遵循 Langfuse 最佳实践：
+    - framework integration (CallbackHandler) 自动捕获 model/token/cost
+    - session_id 将对话分组到 Langfuse Sessions 视图
+    - user_id 支持按用户过滤和成本归因
+    - tags 支持按特性/环境等维度筛选
+    """
+    callbacks: list[Any] = [TokenUsageCallback()]
+    metadata: dict[str, Any] = {}
+
+    try:
+        from src.monitoring.tracer import get_monitor
+
+        monitor = get_monitor()
+        if monitor.langfuse_handler is not None:
+            callbacks.append(monitor.langfuse_handler)
+
+        if session_id:
+            metadata["langfuse_session_id"] = session_id
+        if user_id:
+            metadata["langfuse_user_id"] = user_id
+        if tags:
+            metadata["langfuse_tags"] = tags
+    except Exception:
+        pass
+
+    return callbacks, metadata

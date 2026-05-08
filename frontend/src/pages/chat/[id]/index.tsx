@@ -545,10 +545,10 @@ export default function ChatDetailPage() {
                 </p>
                 <p className="mt-1.5 text-sm text-muted-foreground max-w-xs">
                   {chatMode === "plan"
-                    ? "AI 先规划再逐步执行，适合复杂视频创作任务"
+                    ? "AI 先规划再逐步执行，适合复杂多步骤任务"
                     : chatMode === "ask"
                     ? "纯语言模型对话，不调用工具，快速轻量"
-                    : "ReAct 推理 + 工具调用，适合需要搜索/生成/分析的创作任务"
+                    : "ReAct 推理 + 工具调用，适合需要搜索、生成、分析的复杂任务"
                   }
                 </p>
               </div>
@@ -731,7 +731,7 @@ export default function ChatDetailPage() {
                     ? "描述复杂任务，AI 将先规划再执行... (Enter 发送)"
                     : chatMode === "ask"
                     ? "随便问问，快速解答... (Enter 发送)"
-                    : "描述你的创作需求，AI 将调用工具完成... (Enter 发送)"
+                    : "描述你的需求，AI 将调用工具完成... (Enter 发送)"
                 }
                 value={input}
                 onChange={(e) => setInput(e.target.value)}

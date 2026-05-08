@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Mail, Lock, ArrowRight, RefreshCw, Shield, AlertCircle, Film } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, ArrowRight, RefreshCw, Shield, AlertCircle, Sparkles } from "lucide-react";
 import { CaptchaImage } from "@/components/auth/captcha-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,7 +74,7 @@ export function LoginForm({ onSubmit, isSubmitting, error }: Props) {
       <div className="mx-auto w-full max-w-[400px]">
         {/* Mobile logo */}
         <div className="mb-8 flex items-center justify-center gap-2 lg:hidden">
-          <Film className="h-6 w-6 text-zinc-700 dark:text-zinc-300" />
+          <Sparkles className="h-6 w-6 text-zinc-700 dark:text-zinc-300" />
           <span className="text-lg font-semibold tracking-tight">ClipFlow</span>
         </div>
 
@@ -82,7 +82,7 @@ export function LoginForm({ onSubmit, isSubmitting, error }: Props) {
         <div className="mb-10">
           <h2 className="text-2xl font-bold tracking-tight text-foreground">登录</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            欢迎回到 ClipFlow 视频创作工作台
+            欢迎回到 ClipFlow AI 智能工作台
           </p>
         </div>
 

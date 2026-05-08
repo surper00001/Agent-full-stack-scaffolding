@@ -406,7 +406,11 @@ async def send_message(
                 async for event in agent.stream(
                     user_input=body.content,
                     chat_history=chat_history,
-                    metadata={"thread_id": conversation_id},
+                    metadata={
+                        "thread_id": conversation_id,
+                        "user_id": current_user.id,
+                        "tags": [conv.agent_type, mode],
+                    },
                 ):
                     # Planner 事件
                     if "planner" in event and not plan_emitted:
@@ -556,7 +560,11 @@ async def send_message(
     result = await agent.run(
         user_input=body.content,
         chat_history=chat_history,
-        metadata={"thread_id": conversation_id},
+        metadata={
+            "thread_id": conversation_id,
+            "user_id": current_user.id,
+            "tags": [conv.agent_type, mode],
+        },
     )
 
     ai_response = ""

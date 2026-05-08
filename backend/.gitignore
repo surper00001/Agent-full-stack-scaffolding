@@ -52,3 +52,5 @@ alembic/versions/*.pyc
 
 # Docker
 docker-compose.override.yml
+.agents/
+skills-lock.json

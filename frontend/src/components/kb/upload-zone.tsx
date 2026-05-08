@@ -42,10 +42,10 @@ export function UploadZone({ uploading, fileInputRef, onUpload }: UploadZoneProp
         支持 PDF、Word (.docx)、TXT、Markdown、PNG、JPG 等格式，单文件最大 50MB
       </p>
       <input
-        ref={fileInputRef}
+        ref={fileInputRef as React.Ref<HTMLInputElement>}
         type="file"
         multiple
-        accept=".pdf,.docx,.doc,.txt,.md,.png,.jpg,.jpeg,.bmp,.tiff,.tif"
+        accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.png,.jpg,.jpeg,.bmp,.tiff,.tif"
         onChange={onUpload}
         className="hidden"
       />

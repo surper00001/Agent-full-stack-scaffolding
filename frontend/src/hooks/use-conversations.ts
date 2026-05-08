@@ -28,7 +28,7 @@ export function useConversations() {
   );
 
   const createConversation = useCallback(
-    async (title?: string, agentType = "default", knowledgeBaseId?: string | null) => {
+    async (title?: string, agentType = "general", knowledgeBaseId?: string | null) => {
       const response = await conversationsApi.createConversation({
         title: title || "新对话",
         agent_type: agentType,

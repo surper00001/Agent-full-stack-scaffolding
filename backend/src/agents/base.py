@@ -34,7 +34,7 @@ from src.agents.context_manager import (
 from src.agents.graph import AgentGraphBuilder
 from src.agents.tools import get_default_tools, get_tool_registry
 from src.core.config import get_settings
-from src.llm.callbacks import TokenUsageCallback
+from src.llm.callbacks import TokenUsageCallback, build_trace_callbacks
 from src.monitoring.metrics import get_metrics
 from src.monitoring.tracer import get_monitor
 
@@ -56,11 +56,11 @@ class BaseAgent:
         self._llm = llm
         self._plan_llm = plan_llm or llm  # 未指定则复用执行模型
         self._tools = tools or get_default_tools()
-        self._system_prompt = system_prompt or "你是一个专业的视频创作 AI 助手，请根据用户需求提供专业帮助。"
+        self._system_prompt = system_prompt or "你是一个智能助手，请根据用户需求提供专业帮助。"
         self._tenant_id = tenant_id
         self._enable_planning = enable_planning
-        self._callback = TokenUsageCallback()
         self._settings = get_settings()
+        self._last_token_callback: TokenUsageCallback | None = None
 
         # Context manager
         self._token_counter = TokenCounter(
@@ -129,6 +129,18 @@ class BaseAgent:
             self._context_manager.stats.strategy if self._context_manager.stats else ""
         )
 
+        thread_id = merged_meta.get("thread_id", "default-thread")
+        user_id = merged_meta.get("user_id")
+        tags = merged_meta.get("tags", [])
+
+        callbacks, trace_meta = build_trace_callbacks(
+            session_id=thread_id,
+            user_id=user_id,
+            tags=tags,
+        )
+        merged_meta.update(trace_meta)
+        self._last_token_callback = callbacks[0]  # TokenUsageCallback
+
         initial_state = {
             "messages": messages,
             "plan": [],
@@ -141,11 +153,11 @@ class BaseAgent:
 
         try:
             with monitor.trace("agent_run", merged_meta):
-                thread_id = (metadata or {}).get("thread_id", "default-thread")
                 result = await self._graph.ainvoke(
                     initial_state,
                     config={
-                        "callbacks": [self._callback],
+                        "callbacks": callbacks,
+                        "metadata": merged_meta,
                         "configurable": {
                             "tenant_id": self._tenant_id,
                             "thread_id": thread_id,
@@ -159,7 +171,7 @@ class BaseAgent:
                 "messages": result.get("messages", []),
                 "plan": result.get("plan", []),
                 "plan_summary": result.get("plan_summary", ""),
-                "token_usage": self._callback.get_summary(),
+                "token_usage": self._last_token_callback.get_summary() if self._last_token_callback else {},
                 "context_usage": {
                     "used_tokens": ctx.used_tokens if ctx else 0,
                     "max_tokens": ctx.available_tokens if ctx else 0,
@@ -194,6 +206,16 @@ class BaseAgent:
 
         merged_meta: dict[str, Any] = dict(metadata or {})
         thread_id = merged_meta.get("thread_id", "default-stream-thread")
+        user_id = merged_meta.get("user_id")
+        tags = merged_meta.get("tags", [])
+
+        callbacks, trace_meta = build_trace_callbacks(
+            session_id=thread_id,
+            user_id=user_id,
+            tags=tags,
+        )
+        merged_meta.update(trace_meta)
+        self._last_token_callback = callbacks[0]  # TokenUsageCallback
 
         initial_state = {
             "messages": messages,
@@ -208,7 +230,8 @@ class BaseAgent:
         async for event in self._graph.astream(
             initial_state,
             config={
-                "callbacks": [self._callback],
+                "callbacks": callbacks,
+                "metadata": merged_meta,
                 "configurable": {
                     "tenant_id": self._tenant_id,
                     "thread_id": thread_id,
@@ -218,7 +241,15 @@ class BaseAgent:
             yield event
 
     def get_token_usage(self) -> dict[str, Any]:
-        return self._callback.get_summary()
+        if self._last_token_callback is not None:
+            return self._last_token_callback.get_summary()
+        return {
+            "call_count": 0,
+            "total_tokens": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_cost": 0.0,
+        }
 
     @property
     def context_stats(self) -> ContextUsage | None:

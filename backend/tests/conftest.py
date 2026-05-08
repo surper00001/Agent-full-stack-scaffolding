@@ -40,7 +40,10 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
 
     自动使用 SQLite 内存数据库（PYTEST_RUNNING=1），
     不影响本地 PostgreSQL 数据。
+    通过 dependency_overrides 绕过认证。
     """
+    from unittest.mock import AsyncMock
+
     from src.main import create_app
 
     app = create_app()
@@ -51,6 +54,18 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # 覆盖认证依赖，让测试无需真实 token
+    from src.api import deps as api_deps
+
+    mock_user = api_deps.CurrentUser(
+        id="00000000-0000-0000-0000-000000000001",
+        username="test_user",
+        role="admin",
+    )
+    app.dependency_overrides[api_deps.get_current_user] = lambda: mock_user
+    app.dependency_overrides[api_deps.require_admin] = lambda: mock_user
+    app.dependency_overrides[api_deps.get_current_tenant] = lambda: "default"
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -58,6 +73,7 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
     # 清理
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+    app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture

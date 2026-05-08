@@ -31,6 +31,7 @@ export type {
   KBDocumentView,
   KBPageBlock,
   KBPageContent,
+  KBIndexStatus,
   KBProcessProgress,
   KBSearchRequest,
   KBSearchResponse,

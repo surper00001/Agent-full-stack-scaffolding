@@ -1,14 +1,10 @@
 """
-LLM 监测模块（全开源方案）。
+LLM 监测模块 — Langfuse + OpenTelemetry。
 
-基于 LangFuse + OpenTelemetry 提供：
-- LLM 调用链路追踪（Trace / Span）
-- Token 用量与成本统计
-- 响应延迟监控
-- Agent 执行过程的完整可视化
-
-LangFuse: 开源 LLM 可观测平台（https://github.com/langfuse/langfuse）
-OpenTelemetry: 开放可观测标准，可对接 Jaeger/Tempo/Prometheus
+使用 Langfuse 的 LangChain CallbackHandler 自动追踪：
+- LLM 调用（model、token、cost）
+- Agent 执行链路（Plan → ReAct → Tools）
+- 会话分组（session_id）与用户归因（user_id）
 """
 
 from __future__ import annotations
@@ -24,21 +20,17 @@ from src.core.config import Settings, get_settings
 
 
 class _MonitoringManager:
-    """
-    监测管理器（单例）。
-
-    根据配置自动选择 LangFuse 或 OpenTelemetry 作为后端，
-    提供统一的追踪接口。
-    """
+    """监测管理器（单例）— 按配置选择 Langfuse 或 OpenTelemetry。"""
 
     def __init__(self) -> None:
         self._settings = get_settings()
         self._enabled = self._settings.monitoring_enabled
         self._provider = self._settings.monitoring_provider
         self._initialized = False
+        self._langfuse_handler: Any = None
 
     def initialize(self) -> None:
-        """初始化监测后端（在应用启动时调用）。"""
+        """初始化监测后端（应用启动时调用）。"""
         if not self._enabled:
             logger.info("LLM 监测已禁用")
             return
@@ -53,7 +45,15 @@ class _MonitoringManager:
         self._initialized = True
 
     def _init_langfuse(self) -> None:
-        """初始化 LangFuse 客户端。"""
+        """初始化 Langfuse CallbackHandler（LangChain 集成）。
+
+        Langfuse v2 通过环境变量读取凭证，因此先设置环境变量再创建 Handler。
+        per-request 的 session_id/user_id/tags 通过 LangGraph config metadata 传入，
+        CallbackHandler 的 _parse_langfuse_trace_attributes 会自动解析：
+          - metadata["langfuse_session_id"] → session_id
+          - metadata["langfuse_user_id"]   → user_id
+          - metadata["langfuse_tags"]      → tags
+        """
         public_key = self._settings.langfuse_public_key
         secret_key = (
             self._settings.langfuse_secret_key.get_secret_value()
@@ -62,21 +62,26 @@ class _MonitoringManager:
         )
 
         if not public_key or not secret_key:
-            logger.warning("LangFuse 密钥未配置，LLM 监测将不启用")
+            logger.warning("Langfuse 密钥未配置，LLM 监测将不启用")
             self._enabled = False
             return
 
         try:
-            # 设置 LangChain 环境变量，LangFuse 会自动注入回调
             import os
 
             os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
             os.environ["LANGFUSE_SECRET_KEY"] = secret_key
             os.environ["LANGFUSE_HOST"] = self._settings.langfuse_host
 
-            logger.info(f"LangFuse 监测已初始化 | host: {self._settings.langfuse_host}")
+            from langfuse.langchain import CallbackHandler
+
+            self._langfuse_handler = CallbackHandler()
+
+            logger.info(
+                f"Langfuse 监测已初始化 | host: {self._settings.langfuse_host}"
+            )
         except Exception as e:
-            logger.error(f"LangFuse 初始化失败: {e}")
+            logger.error(f"Langfuse 初始化失败: {e}")
             self._enabled = False
 
     def _init_otel(self) -> None:
@@ -109,20 +114,19 @@ class _MonitoringManager:
             logger.error(f"OpenTelemetry 初始化失败: {e}")
             self._enabled = False
 
+    @property
+    def langfuse_handler(self) -> Any | None:
+        """获取 Langfuse LangChain CallbackHandler（供 Agent/LLM 注入）。"""
+        return self._langfuse_handler
+
+    def is_enabled(self) -> bool:
+        return self._enabled and self._langfuse_handler is not None
+
     @contextmanager
     def trace(
         self, name: str, metadata: dict[str, Any] | None = None
     ) -> Any:
-        """
-        创建追踪 Span 的上下文管理器。
-
-        使用示例:
-            with monitor.trace("agent_execute", {"agent_type": "chat"}) as span:
-                result = await agent.run(input)
-
-        注意: 这是一个轻量级包装，实际的 LangChain 回调
-              由 LangFuse / OTEL 自动注入到 LLM 调用链中。
-        """
+        """轻量级手动 Span（仅用于非 LangChain 代码段）。"""
         start = time.monotonic()
         span_data: dict[str, Any] = {
             "name": name,
@@ -147,11 +151,15 @@ class _MonitoringManager:
     async def atrace(
         self, name: str, metadata: dict[str, Any] | None = None
     ) -> Any:
-        """异步版本追踪，用法同 trace()，但允许在 async with 中使用。"""
         return self.trace(name, metadata)
 
-    def is_enabled(self) -> bool:
-        return self._enabled
+    def flush(self) -> None:
+        """确保所有追踪数据已发送（进程退出前调用）。"""
+        if self._langfuse_handler is not None:
+            try:
+                self._langfuse_handler.flush()
+            except Exception:
+                pass
 
 
 # 全局单例
