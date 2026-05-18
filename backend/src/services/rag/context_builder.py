@@ -26,6 +26,11 @@ class CitationItem:
     chunk_type: str = "text"
     section_title: str = ""
     document_id: str | None = None
+    # 图片字段（知识库图片块在聊天中可渲染）
+    image_url: str = ""
+    image_description: str = ""
+    image_caption: str = ""
+    ocr_status: str = ""
 
 
 @dataclass
@@ -52,6 +57,10 @@ class RAGContext:
                     "chunk_type": c.chunk_type,
                     "section_title": c.section_title,
                     "document_id": c.document_id,
+                    "image_url": c.image_url,
+                    "image_description": c.image_description,
+                    "image_caption": c.image_caption,
+                    "ocr_status": c.ocr_status,
                 }
                 for c in self.citations
             ],
@@ -75,6 +84,10 @@ class RAGContext:
                         "chunk_id": c.chunk_id,
                         "chunk_type": c.chunk_type,
                         "section_title": c.section_title,
+                        "image_url": c.image_url,
+                        "image_description": c.image_description,
+                        "image_caption": c.image_caption,
+                        "ocr_status": c.ocr_status,
                     }
                     for c in self.citations
                 ],
@@ -87,7 +100,7 @@ class RAGContext:
 
 def _item_to_citation(item: dict[str, Any]) -> CitationItem:
     meta = item.get("metadata_") or {}
-    section = meta.get("section_title", "") if isinstance(meta, dict) else ""
+    meta = meta if isinstance(meta, dict) else {}
     return CitationItem(
         chunk_id=item.get("chunk_id", ""),
         content=item.get("expanded_content") or item.get("content", ""),
@@ -95,8 +108,12 @@ def _item_to_citation(item: dict[str, Any]) -> CitationItem:
         page=item.get("page_start", 1),
         score=float(item.get("score", 0)),
         chunk_type=item.get("chunk_type", "text"),
-        section_title=section,
+        section_title=meta.get("section_title", ""),
         document_id=item.get("document_id"),
+        image_url=meta.get("image_url", ""),
+        image_description=meta.get("image_description", ""),
+        image_caption=meta.get("image_caption", ""),
+        ocr_status=meta.get("ocr_status", ""),
     )
 
 
@@ -220,6 +237,10 @@ def parse_tool_result_citations(result_json: str) -> list[CitationItem]:
                 score=float(r.get("score", 0)),
                 chunk_type=r.get("chunk_type", "text"),
                 section_title=r.get("section_title", ""),
+                image_url=r.get("image_url", ""),
+                image_description=r.get("image_description", ""),
+                image_caption=r.get("image_caption", ""),
+                ocr_status=r.get("ocr_status", ""),
             )
         )
     return citations

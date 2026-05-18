@@ -73,12 +73,17 @@ export async function deleteKB(id: string): Promise<void> {
 export async function uploadDocument(
   kbId: string,
   file: File,
+  onProgress?: (pct: number) => void,
 ): Promise<ApiResponse<KBUploadResponse>> {
   const formData = new FormData();
   formData.append("file", file);
-  // 勿手动设置 Content-Type，须由浏览器附带 boundary
   const { data } = await client.post(`${PATH}/${kbId}/documents`, formData, {
     timeout: KB_UPLOAD_TIMEOUT,
+    onUploadProgress: (e) => {
+      if (e.total && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    },
   });
   return data;
 }

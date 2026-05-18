@@ -86,6 +86,7 @@ export async function* streamMessageV2(
   mode: "ask" | "agent" | "plan" = "agent",
   planModel?: string | null,
   knowledgeBaseId?: string | null,
+  imageIds?: string[] | null,
 ): AsyncGenerator<StreamEvent, void, unknown> {
   const token = localStorage.getItem(AUTH_TOKEN_KEY);
   const response = await fetch(
@@ -102,6 +103,7 @@ export async function* streamMessageV2(
         mode,
         plan_model: planModel || null,
         knowledge_base_id: knowledgeBaseId || null,
+        image_ids: imageIds?.length ? imageIds : null,
       }),
       signal,
     },
@@ -181,4 +183,19 @@ export async function* streamMessage(
       yield event.data as string;
     }
   }
+}
+
+/** 上传聊天图片，返回 image_id 供 send 接口使用 */
+export async function uploadChatImage(
+  conversationId: string,
+  file: File,
+): Promise<{ image_id: string; filename: string; preview: string | null }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await client.post(
+    `${PATH}/${conversationId}/images`,
+    formData,
+    { timeout: 60000 },
+  );
+  return data.data as { image_id: string; filename: string; preview: string | null };
 }

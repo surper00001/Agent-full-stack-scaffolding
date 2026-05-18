@@ -227,11 +227,68 @@ export const useKBStore = create<KBStore>((set, get) => ({
   },
 
   uploadDocument: async (kbId, file) => {
+    const tempId = `upload_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    // 立即显示上传进度卡片
+    set((s) => ({
+      uploadProgressMap: {
+        ...s.uploadProgressMap,
+        [tempId]: {
+          docId: tempId,
+          filename: file.name,
+          stage: "uploading",
+          stageLabel: "上传文件中",
+          percentage: 0,
+          estimatedSeconds: null,
+          errorMessage: null,
+        },
+      },
+    }));
     try {
-      const res = await kbApi.uploadDocument(kbId, file);
-      return { docId: res.data.document_id };
+      const res = await kbApi.uploadDocument(kbId, file, (pct) => {
+        set((s) => {
+          const entry = s.uploadProgressMap[tempId];
+          if (!entry) return s;
+          return {
+            uploadProgressMap: {
+              ...s.uploadProgressMap,
+              [tempId]: { ...entry, percentage: pct },
+            },
+          };
+        });
+      });
+      const docId = res.data.document_id;
+      // 将临时条目替换为真实 docId 条目，切换到轮询阶段
+      set((s) => {
+        const next = { ...s.uploadProgressMap };
+        delete next[tempId];
+        next[docId] = {
+          docId,
+          filename: file.name,
+          stage: "uploaded",
+          stageLabel: "上传完成，等待处理",
+          percentage: 100,
+          estimatedSeconds: null,
+          errorMessage: null,
+        };
+        return { uploadProgressMap: next };
+      });
+      get().pollProgress(kbId, docId, file.name);
+      return { docId };
     } catch (err) {
-      set({ kbError: (err as Error).message });
+      set((s) => {
+        const next = { ...s.uploadProgressMap };
+        const temp = next[tempId];
+        delete next[tempId];
+        if (temp) {
+          next[tempId] = {
+            ...temp,
+            stage: "error",
+            stageLabel: "上传失败",
+            errorMessage: (err as Error).message || "文件上传失败",
+          };
+        }
+        return { uploadProgressMap: next };
+      });
       throw err;
     }
   },
@@ -263,11 +320,8 @@ export const useKBStore = create<KBStore>((set, get) => ({
         const res = await kbApi.getDocumentProgress(kbId, docId);
         const progress = res.data;
         if (!progress) {
-          set((s) => {
-            const next = { ...s.uploadProgressMap };
-            delete next[docId];
-            return { uploadProgressMap: next };
-          });
+          // 后端尚未开始处理，保留当前卡片，短暂后重试
+          setTimeout(poll, 800);
           return;
         }
 
@@ -310,7 +364,8 @@ export const useKBStore = create<KBStore>((set, get) => ({
         };
         setTimeout(poll, intervals[progress.stage] || 1000);
       } catch {
-        get().clearUploadProgress(docId);
+        // 网络瞬时错误 — 2 秒后重试，不删除进度卡片
+        setTimeout(poll, 2000);
       }
     };
     poll();

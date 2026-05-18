@@ -20,6 +20,7 @@ from src.db.repository import BaseRepository
 from src.models.domain.knowledge_base import KBChunk, KBDocument, KnowledgeBase
 from src.services.chunking_service import ChunkingService
 from src.services.document_processor import DocumentProcessor
+from src.services.document_processors.mineru import filter_noise_blocks
 from src.services.embedding_service import EmbeddingService, get_embedding_service
 from src.services.file_storage import FileStorageService
 from src.services.processing_progress import (
@@ -96,17 +97,73 @@ class KnowledgeBaseService:
                 return truncated[: idx + 1]
         return truncated
 
+    # 文档类型中文标签
+    _DOC_CATEGORY_LABELS: dict[str, str] = {
+        "academic": "学术论文",
+        "technical": "技术文档",
+        "legal": "法律/合同",
+        "report": "报告/白皮书",
+        "markdown": "Markdown 技术文档",
+        "general": "通用文档",
+    }
+
+    # 版面标签中文映射
+    _LAYOUT_TAG_LABELS: dict[str, str] = {
+        "title": "文档标题",
+        "heading": "章节标题",
+        "subtitle": "副标题",
+        "body": "正文",
+        "abstract": "摘要",
+        "keywords": "关键词",
+        "caption": "图表说明",
+        "header": "页眉",
+        "footer": "页脚",
+        "footnote": "脚注",
+        "reference": "参考文献",
+        "list_item": "列表项",
+        "table_body": "表格",
+        "image_region": "图片区域",
+        "code": "代码块",
+    }
+
     @classmethod
     def _build_embed_text(cls, chunk: Any) -> str:
-        """索引时拼接结构化信号，提升按章节名/概念召回能力。"""
+        """构建 metadata-aware embedding 输入。
+
+        结构化前缀帮助向量模型按章节名/类型/语义标签召回，
+        比纯文本 embedding 准确度显著提升。
+        """
         parts: list[str] = []
+
+        # 文档类型上下文
+        doc_cat = getattr(chunk, "doc_category", None) or ""
+        cat_label = cls._DOC_CATEGORY_LABELS.get(doc_cat, "")
+        if cat_label:
+            parts.append(f"[文档类型] {cat_label}")
+
+        # 版面语义标签
+        layout_tag = getattr(chunk, "layout_tag", None) or ""
+        tag_label = cls._LAYOUT_TAG_LABELS.get(layout_tag, "")
+        if tag_label:
+            parts.append(f"[语义标签] {tag_label}")
+
+        # 章节层级路径（核心召回信号）
         if chunk.section_path:
-            parts.append(f"章节: {chunk.section_path}")
-        if chunk.section_title:
-            parts.append(f"标题: {chunk.section_title}")
+            parts.append(f"[章节路径] {chunk.section_path}")
+        elif chunk.section_title:
+            parts.append(f"[章节] {chunk.section_title}")
+
+        # 标题
+        if chunk.section_title and chunk.section_path:
+            parts.append(f"[小节标题] {chunk.section_title}")
+
+        # 内容摘要（粗粒度语义信号）
         if chunk.content_summary:
-            parts.append(f"摘要: {chunk.content_summary}")
+            parts.append(f"[摘要] {chunk.content_summary}")
+
+        # 正文
         parts.append(chunk.content)
+
         full = "\n".join(parts)
         if len(full) > cls._EMBED_TEXT_MAX_CHARS:
             from loguru import logger
@@ -378,6 +435,9 @@ class KnowledgeBaseService:
                 doc_id=doc_id,
             )
 
+            # 过滤页眉/页脚等噪声块（在 chunking/embedding 之前）
+            blocks = filter_noise_blocks(blocks)
+
             # 统计解析结果并报告详情
             text_count = sum(1 for b in blocks if b.block_type == "text")
             table_count = sum(1 for b in blocks if b.block_type == "table")
@@ -500,6 +560,7 @@ class KnowledgeBaseService:
                         "is_heading": chunk.is_heading,
                         "heading_level": chunk.heading_level,
                         "doc_category": chunk.doc_category,
+                        "layout_tag": chunk.layout_tag,
                     },
                 )
                 kb_chunks.append(kb_chunk)

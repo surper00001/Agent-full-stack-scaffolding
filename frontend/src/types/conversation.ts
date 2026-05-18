@@ -109,6 +109,12 @@ export interface KBCitation {
   chunk_id: string;
   chunk_type: "text" | "table" | "image";
   section_title?: string;
+  document_id?: string;
+  /** 图片块专用字段 */
+  image_url?: string;
+  image_description?: string;
+  image_caption?: string;
+  ocr_status?: string;
 }
 
 /** KB 搜索结果（来自 search_knowledge_base 工具） */

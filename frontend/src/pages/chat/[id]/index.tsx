@@ -5,13 +5,13 @@ import type { ChatMode } from "@/types";
 import {
   Send, Bot, User, Square, Copy, Check, ChevronDown, RefreshCw, Clock,
   Wrench, Loader2, Download, ListChecks, FileText, Zap, MessageSquare, Brain, Workflow,
-  Library, BookOpen, X,
+  Library, BookOpen, X, ImagePlus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import * as conversationsApi from "@/api/conversations";
 import { API_BASE_URL, CONTEXT_MAX_TOKENS } from "@/lib/constants";
 import type { ContextUsageSnapshot, ToolCall } from "@/types";
-import { useKBStore } from "@/stores";
+import { useKBStore, useConversationStore } from "@/stores";
 import { CitationCards, parseKBCitations, parseCitationsFromArray, type KBCitation } from "@/components/kb/citation-cards";
 
 // ---- Types ----
@@ -105,6 +105,56 @@ export default function ChatDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const { kbList, fetchKBList } = useKBStore();
+  const { refreshConversations } = useConversationStore();
+
+  // 图片上传
+  interface UploadedImage {
+    imageId: string;
+    filename: string;
+    preview: string | null;
+    objectUrl: string;
+  }
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !id) return;
+    setIsUploadingImage(true);
+    const newImages: UploadedImage[] = [];
+    for (const file of Array.from(files)) {
+      try {
+        const result = await conversationsApi.uploadChatImage(id, file);
+        newImages.push({
+          imageId: result.image_id,
+          filename: result.filename,
+          preview: result.preview,
+          objectUrl: URL.createObjectURL(file),
+        });
+      } catch {
+        // 单张上传失败，继续处理剩余
+      }
+    }
+    setUploadedImages((prev) => [...prev, ...newImages]);
+    setIsUploadingImage(false);
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  }, [id]);
+
+  const removeImage = useCallback((imageId: string) => {
+    setUploadedImages((prev) => {
+      const img = prev.find((i) => i.imageId === imageId);
+      if (img) URL.revokeObjectURL(img.objectUrl);
+      return prev.filter((i) => i.imageId !== imageId);
+    });
+  }, []);
+
+  const clearUploadedImages = useCallback(() => {
+    setUploadedImages((prev) => {
+      for (const img of prev) URL.revokeObjectURL(img.objectUrl);
+      return [];
+    });
+  }, []);
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -344,8 +394,14 @@ export default function ChatDetailPage() {
     const files: FileOutput[] = [];
     let messageCitations: KBCitation[] = [];
     try {
+      const imageIds = uploadedImages.map((img) => img.imageId);
+      if (imageIds.length > 0) {
+        clearUploadedImages();
+      }
+
       for await (const event of conversationsApi.streamMessageV2(
         id, content, controller.signal, chatMode, null, kbIdForRequest,
+        imageIds.length > 0 ? imageIds : null,
       )) {
         if (event.type === "plan") {
           const plan = event.data as { steps: PlanStep[]; summary: string };
@@ -406,6 +462,7 @@ export default function ChatDetailPage() {
           files: files.length > 0 ? files : undefined,
           citations: messageCitations.length > 0 ? messageCitations : undefined,
         }]);
+        refreshConversations();
       }
     } catch (err: unknown) {
       if ((err as Error)?.name === "AbortError") return;
@@ -685,8 +742,59 @@ export default function ChatDetailPage() {
             </div>
           )}
 
+          {/* 图片预览区 */}
+          {uploadedImages.length > 0 && (
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {uploadedImages.map((img) => (
+                <div key={img.imageId} className="relative group shrink-0">
+                  <img
+                    src={img.objectUrl}
+                    alt={img.filename}
+                    className="h-14 w-14 rounded-lg object-cover border"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeImage(img.imageId)}
+                    className="absolute -top-1.5 -right-1.5 rounded-full bg-destructive text-destructive-foreground p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                  {img.preview && (
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5 rounded-b-lg truncate">
+                      {img.preview.slice(0, 20)}...
+                    </div>
+                  )}
+                </div>
+              ))}
+              {isUploadingImage && (
+                <span className="h-14 w-14 rounded-lg border flex items-center justify-center">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="flex items-end gap-2">
             <div className="relative shrink-0" ref={kbPickerRef}>
+              <input
+                ref={imageInputRef}
+                type="file"
+                multiple
+                accept="image/png,image/jpeg,image/jpg,image/bmp,image/webp"
+                onChange={handleImageSelect}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-11 w-11"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={isUploadingImage || isStreaming}
+                title="上传图片"
+              >
+                <ImagePlus className="h-4 w-4" />
+              </Button>
               <Button
                 type="button"
                 variant={activeKbId ? "default" : "ghost"}

@@ -18,6 +18,7 @@ const HardDriveIcon = ({ className }: { className?: string }) => (
 );
 
 const STAGE_ICONS: Record<string, LucideIcon> = {
+  uploading: Upload,
   uploaded: Upload,
   analyzing: Search,
   parsing: FileText,
@@ -28,7 +29,7 @@ const STAGE_ICONS: Record<string, LucideIcon> = {
   error: FileText,
 };
 
-const STAGE_ORDER = ["uploaded", "analyzing", "parsing", "chunking", "embedding", "indexing", "ready"];
+const STAGE_ORDER = ["uploading", "uploaded", "analyzing", "parsing", "chunking", "embedding", "indexing", "ready"];
 
 function formatETA(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)} 秒`;

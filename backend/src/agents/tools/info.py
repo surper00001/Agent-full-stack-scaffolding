@@ -168,6 +168,10 @@ def create_kb_search_tool(
                     "chunk_id": c.chunk_id,
                     "chunk_type": c.chunk_type,
                     "section_title": c.section_title,
+                    "image_url": c.image_url,
+                    "image_description": c.image_description,
+                    "image_caption": c.image_caption,
+                    "ocr_status": c.ocr_status,
                 }
                 for c in top
             ]

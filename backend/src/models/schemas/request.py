@@ -43,6 +43,10 @@ class ChatMessageRequest(BaseModel):
         default=None, max_length=64,
         description="关联的知识库 ID，设置后 Agent 可在对话中检索该知识库",
     )
+    image_ids: list[str] | None = Field(
+        default=None, max_length=10,
+        description="关联的图片 ID 列表（先通过上传接口获取），Agent 会理解图片内容后回复",
+    )
 
 
 # ---- Agent 请求 ----

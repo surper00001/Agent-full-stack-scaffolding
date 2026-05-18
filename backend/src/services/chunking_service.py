@@ -37,13 +37,15 @@ class StructuredBlock:
     image_path: str | None = None
     section_title: str | None = None
     section_path: str | None = None  # 章节层级路径
-    # 新增：图片描述（非 OCR，语义理解）
+    # 图片描述（非 OCR，语义理解）
     image_description: str | None = None
     image_caption: str | None = None
     ocr_status: str | None = None  # success | empty | failed | disabled
     ocr_error: str | None = None
-    # 新增：表格标题/说明
+    # 表格标题/说明
     table_caption: str | None = None
+    # 版面语义标签（LayoutTag 值）
+    layout_tag: str | None = None
 
 
 @dataclass
@@ -72,28 +74,24 @@ class ChunkResult:
     is_heading: bool = False
     heading_level: int = 0
     doc_category: str | None = None
+    # 版面语义标签
+    layout_tag: str | None = None
 
 
 class ChunkingService:
     """智能分块器 —— 根据文档结构自适应调整策略。"""
 
-    # 中文语义分隔符优先级（粗 → 细）
+    # ── 动态分隔符策略（按文档类型分层降级） ──
+
+    # 通用语义分隔符（中文 + 混合）
     _SEPARATORS_SEMANTIC = [
-        # L0: Markdown 标题
         "\n## ", "\n### ", "\n#### ", "\n##### ",
-        # L1: 中文章节分界
         "\n第[一二三四五六七八九十百千]+[章节篇部]",
-        # L2: 段落间距
         "\n\n", "\n\r\n",
-        # L3: 中文句群边界（起承转合）
         "。\n", "；\n", "！\n", "？\n",
-        # L4: 中文句边界
         "。", "！", "？", "；",
-        # L5: 英文句边界
         ". ", "! ", "? ", ".\n",
-        # L6: 空格
         "  ", " ",
-        # L7: 无分隔符（强制切断）
         "",
     ]
 
@@ -106,9 +104,65 @@ class ChunkingService:
         "",
     ]
 
-    # 中文章节正则分隔符（需 re.split，不能用 str.split）
-    _REGEX_SEPARATORS = {
+    # 学术论文：标题层级优先，保留摘要/结论完整性
+    _SEPARATORS_ACADEMIC = [
+        "\n## ", "\n### ", "\n#### ",
         "\n第[一二三四五六七八九十百千]+[章节篇部]",
+        "\n(?:Abstract|Introduction|Method|Experiment|Result|Conclusion|Reference)",
+        "\n\n",
+        "。\n", "；\n",
+        "。", "！", "？",
+        ". ", "  ", " ",
+        "",
+    ]
+
+    # 法律/合同：条款编号优先，小粒度精确分割
+    _SEPARATORS_LEGAL = [
+        r"\n第[一二三四五六七八九十百千\d]+[条款章节]",
+        r"\n\d+[\.\、]\d+[\.\、]",  # 条款编号 1.1.1
+        r"\n[（(][一二三四五六七八九十\d]+[）)]",
+        "\n\n",
+        "。", "；",
+        "  ", " ",
+        "",
+    ]
+
+    # 技术文档：标题 + 代码块边界，大粒度保留上下文
+    _SEPARATORS_TECHNICAL = [
+        "\n## ", "\n### ", "\n#### ",
+        "\n\n", "\n```",
+        "。\n", "\n",
+        "。", "！", "？",
+        "  ", ". ",
+        "",
+    ]
+
+    # 报告/白皮书：章节 + 段落，中等粒度
+    _SEPARATORS_REPORT = [
+        "\n## ", "\n### ",
+        "\n第[一二三四五六七八九十百千]+[章节篇部]",
+        "\n\n",
+        "。\n", "\n",
+        "。", "！", "？",
+        "  ", ". ", " ",
+        "",
+    ]
+
+    # 正则分隔符（需 re.split，不能用 str.split）
+    _REGEX_SEPARATORS = {
+        r"\n第[一二三四五六七八九十百千]+[章节篇部]",
+        r"\n第[一二三四五六七八九十百千\d]+[条款章节]",
+        r"\n\d+[\.\、]\d+[\.\、]",
+        r"\n(?:Abstract|Introduction|Method|Experiment|Result|Conclusion|Reference)",
+    }
+
+    # 文档类型 → 分隔符策略
+    _CATEGORY_SEPARATORS: dict[str, list[str]] = {
+        "academic": _SEPARATORS_ACADEMIC,
+        "legal": _SEPARATORS_LEGAL,
+        "technical": _SEPARATORS_TECHNICAL,
+        "report": _SEPARATORS_REPORT,
+        "markdown": _SEPARATORS_SEMANTIC,
     }
     _CHINESE_CHAR_PATTERN = re.compile(r"[一-鿿㐀-䶿]")
     _CHINESE_PUNCT = re.compile(r"[。！？；，、：""''（）【】《》…—　]")
@@ -154,21 +208,32 @@ class ChunkingService:
         self.parent_chunk_size = parent_chunk_size
         self.parent_chunk_overlap = parent_chunk_overlap
 
-        # 选择合适的分隔符顺序（中文与 mixed 均用语义分隔符）
-        if doc_structure is not None and doc_structure.detected_lang in ("zh", "mixed"):
+        # 动态分隔符策略：文档类型 → 语言 → 通用降级
+        category_seps = self._CATEGORY_SEPARATORS.get(self.doc_category)
+        if category_seps:
+            self._active_separators = category_seps
+        elif doc_structure is not None and doc_structure.detected_lang in ("zh", "mixed"):
             self._active_separators = self._SEPARATORS_SEMANTIC
         else:
             self._active_separators = self._SEPARATORS_STANDARD
 
+        logger.debug(
+            f"分块策略: category={self.doc_category} "
+            f"chunk_size={self.child_chunk_size} "
+            f"parent={self.use_parent_chunking} "
+            f"merge_small={self.merge_small}"
+        )
+
     def chunk_blocks(
         self, blocks: list[StructuredBlock], _doc_structure: DocStructure | None = None
     ) -> list[ChunkResult]:
-        """对结构化块列表进行智能分块。
+        """对结构化块进行语义分块。
 
-        策略：
-        1. 代码块、表格、图片保持完整不拆分
-        2. 文本块：语义段落检测 → 小段落合并 → 父子分块
-        3. 保留章节层级路径
+        策略（分层降级）：
+        1. 特殊块（表格/图片/代码）保持完整不拆分
+        2. 文本按 section 分组 → 同 section 内按页 → 按 char 分块
+        3. 无 section 信息时降级为按页分块
+        4. 保留章节层级路径 + 版面标签
         """
         results: list[ChunkResult] = []
         chunk_index = 0
@@ -183,44 +248,74 @@ class ChunkingService:
             else:
                 text_blocks.append(block)
 
-        # 第二步：仅合并同页文本，保留页码边界
-        if not text_blocks:
-            merged_stream: list[StructuredBlock] = []
-        else:
-            merged_stream = self._merge_text_stream(text_blocks)
+        # 第二步：合并连续文本流（跨页未完成句合并）
+        merged_stream = self._merge_text_stream(text_blocks) if text_blocks else []
 
-        # 第三步：检测并标记语义段落边界
-        merged_stream = self._detect_semantic_paragraphs(merged_stream)
+        # 第三步：按 section 分组（核心语义边界）
+        section_groups = self._group_by_section(merged_stream)
 
-        # 第四步：小段落合并（如果启用）
-        if self.merge_small:
-            merged_stream = self._merge_small_stream(merged_stream)
+        # 第四步：逐 section 分块
+        for _section_key, section_blocks in section_groups:
+            section_title = section_blocks[0].section_title if section_blocks else None
+            section_path = section_blocks[0].section_path if section_blocks else None
 
-        # 第五步：按页分块，确保 page_start/page_end 与查看页一致
-        page_groups: dict[int, list[StructuredBlock]] = {}
-        for block in merged_stream:
-            page_groups.setdefault(block.page_number, []).append(block)
+            # 小段落合并
+            if self.merge_small:
+                section_blocks = self._merge_small_paragraphs(
+                    {section_blocks[0].page_number: section_blocks}
+                ).get(section_blocks[0].page_number, section_blocks)
 
-        for page_num in sorted(page_groups.keys()):
-            page_blocks = page_groups[page_num]
-            full_text = "\n".join(b.content for b in page_blocks)
-            if not full_text.strip():
-                continue
-            page_start = page_end = page_num
-            section = self._best_section(page_blocks)
-            section_path = self._best_section_path(page_blocks)
+            # 按页分组（保留页码精确性）
+            page_groups: dict[int, list[StructuredBlock]] = {}
+            for block in section_blocks:
+                page_groups.setdefault(block.page_number, []).append(block)
 
-            if self.use_parent_chunking:
-                parent_chunks = self._split_text(
-                    full_text, self.parent_chunk_size, self.parent_chunk_overlap
-                )
-                for parent_text in parent_chunks:
-                    if not parent_text.strip():
-                        continue
-                    parent_id = str(uuid.uuid4())
-                    summary = self._generate_chunk_summary(parent_text)
+            for page_num in sorted(page_groups.keys()):
+                page_blocks = page_groups[page_num]
+                full_text = "\n".join(b.content for b in page_blocks)
+                if not full_text.strip():
+                    continue
+                page_start = page_end = page_num
+                # section 信息优先使用 group 级别的
+                sec = section_title or self._best_section(page_blocks)
+                sec_path = section_path or self._best_section_path(page_blocks)
+
+                if self.use_parent_chunking:
+                    parent_chunks = self._split_text(
+                        full_text, self.parent_chunk_size, self.parent_chunk_overlap
+                    )
+                    for parent_text in parent_chunks:
+                        if not parent_text.strip():
+                            continue
+                        parent_id = str(uuid.uuid4())
+                        summary = self._generate_chunk_summary(parent_text)
+                        child_texts = self._split_text(
+                            parent_text, self.child_chunk_size, self.child_chunk_overlap
+                        )
+                        for child_text in child_texts:
+                            if not child_text.strip():
+                                continue
+                            is_heading, heading_level = self._is_heading(child_text)
+                            results.append(ChunkResult(
+                                chunk_id=str(uuid.uuid4()),
+                                content=child_text,
+                                chunk_index=chunk_index,
+                                page_start=page_start,
+                                page_end=page_end,
+                                chunk_type="text",
+                                parent_chunk_id=parent_id,
+                                section_title=sec,
+                                section_path=sec_path,
+                                content_summary=summary,
+                                is_heading=is_heading,
+                                heading_level=heading_level,
+                                doc_category=self.doc_category,
+                                layout_tag=page_blocks[0].layout_tag if page_blocks else None,
+                            ))
+                            chunk_index += 1
+                else:
                     child_texts = self._split_text(
-                        parent_text, self.child_chunk_size, self.child_chunk_overlap
+                        full_text, self.child_chunk_size, self.child_chunk_overlap
                     )
                     for child_text in child_texts:
                         if not child_text.strip():
@@ -233,42 +328,22 @@ class ChunkingService:
                             page_start=page_start,
                             page_end=page_end,
                             chunk_type="text",
-                            parent_chunk_id=parent_id,
-                            section_title=section,
-                            section_path=section_path,
-                            content_summary=summary,
+                            section_title=sec,
+                            section_path=sec_path,
                             is_heading=is_heading,
                             heading_level=heading_level,
                             doc_category=self.doc_category,
+                            layout_tag=page_blocks[0].layout_tag if page_blocks else None,
                         ))
                         chunk_index += 1
-            else:
-                child_texts = self._split_text(
-                    full_text, self.child_chunk_size, self.child_chunk_overlap
-                )
-                for child_text in child_texts:
-                    if not child_text.strip():
-                        continue
-                    is_heading, heading_level = self._is_heading(child_text)
-                    results.append(ChunkResult(
-                        chunk_id=str(uuid.uuid4()),
-                        content=child_text,
-                        chunk_index=chunk_index,
-                        page_start=page_start,
-                        page_end=page_end,
-                        chunk_type="text",
-                        section_title=section,
-                        section_path=section_path,
-                        is_heading=is_heading,
-                        heading_level=heading_level,
-                        doc_category=self.doc_category,
-                    ))
-                    chunk_index += 1
 
-        # 第六步：特殊块处理
+        # 第五步：特殊块关联到所在 section
         for block in special_blocks:
             chunk_id = str(uuid.uuid4())
             summary = self._generate_chunk_summary(block.content)
+            # 找到最近的同 section 文本块
+            section = block.section_title or self._best_section([block])
+            section_path = block.section_path
 
             results.append(ChunkResult(
                 chunk_id=chunk_id,
@@ -282,14 +357,15 @@ class ChunkingService:
                 table_html=block.table_html,
                 table_data=block.table_data,
                 image_path=block.image_path,
-                section_title=block.section_title or self._best_section([block]),
-                section_path=block.section_path,
+                section_title=section,
+                section_path=section_path,
                 ocr_status=block.ocr_status,
                 ocr_error=block.ocr_error,
                 image_caption=block.image_caption,
                 image_description=block.image_description,
                 content_summary=summary,
                 doc_category=self.doc_category,
+                layout_tag=block.layout_tag,
             ))
             chunk_index += 1
 
@@ -302,6 +378,59 @@ class ChunkingService:
             f"父块={len({c.parent_chunk_id for c in results if c.parent_chunk_id})}"
         )
         return results
+
+    # ---- Section grouping ----
+
+    @staticmethod
+    def _group_by_section(
+        blocks: list[StructuredBlock],
+    ) -> list[tuple[str, list[StructuredBlock]]]:
+        """按 section 边界分组文本块，保持文档语义结构。
+
+        降级策略：
+        1. 有 section_title 变化 → 新 section 组
+        2. 遇到 heading layout_tag → 新 section 组
+        3. 无任何 section 信息 → 全部归入一组（降级为全文档）
+        """
+        if not blocks:
+            return []
+
+        groups: list[tuple[str, list[StructuredBlock]]] = []
+        current_key = ""
+        current_blocks: list[StructuredBlock] = []
+
+        for block in blocks:
+            # 确定 section key
+            section_title = block.section_title or ""
+            layout_tag = block.layout_tag or ""
+
+            # heading/title 类标签触发新 section
+            is_heading_block = layout_tag in (
+                "title", "heading", "subtitle",
+            )
+
+            if section_title:
+                # 有明确 section_title，用它作为 key
+                block_key = section_title
+            elif is_heading_block:
+                # 无 section_title 但被标记为 heading，用内容前 60 字作为 key
+                block_key = block.content[:60].strip()
+            else:
+                block_key = current_key  # 继承当前 section
+
+            # section 边界检测
+            if block_key != current_key:
+                if current_blocks:
+                    groups.append((current_key, current_blocks))
+                current_key = block_key
+                current_blocks = [block]
+            else:
+                current_blocks.append(block)
+
+        if current_blocks:
+            groups.append((current_key, current_blocks))
+
+        return groups
 
     # ---- Semantic paragraph detection ----
 

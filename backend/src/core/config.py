@@ -143,6 +143,24 @@ class Settings(BaseSettings):
         alias="BOCHA_API_BASE",
     )
 
+    # ---- 视觉语言模型 VLM（OCR 增强 / 图像描述） ----
+    dashscope_api_key: SecretStr = Field(
+        default=SecretStr(""), alias="DASHSCOPE_API_KEY",
+        description="阿里云 DashScope API Key（Qwen3-VL 多模态模型）",
+    )
+    dashscope_api_base: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        alias="DASHSCOPE_API_BASE",
+    )
+    vlm_enabled: bool = Field(
+        default=True, alias="VLM_ENABLED",
+        description="是否启用 VLM 增强 OCR 与图像描述（Qwen3-VL-Flash）",
+    )
+    vlm_model: str = Field(
+        default="qwen3-vl-flash", alias="VLM_MODEL",
+        description="多模态图像理解模型名称",
+    )
+
     # ---- 文件输出 ----
     file_output_dir: str = Field(
         default="./data/outputs", alias="FILE_OUTPUT_DIR",
@@ -280,6 +298,30 @@ class Settings(BaseSettings):
     kb_ocr_lang: str = Field(
         default="ch", alias="KB_OCR_LANG",
         description="PaddleOCR 语言模型（ch=中英文混合）",
+    )
+    kb_vlm_table_extraction: bool = Field(
+        default=True, alias="KB_VLM_TABLE_EXTRACTION",
+        description="是否使用 VLM（Qwen3-VL-Flash）从 PDF 页面发现并提取表格",
+    )
+    kb_vlm_table_extraction_max_pages: int = Field(
+        default=5, alias="KB_VLM_TABLE_EXTRACTION_MAX_PAGES",
+        description="每个文档最多使用 VLM 提取表格的页数（控制成本）",
+    )
+    kb_pdf_parser: Literal["default", "mineru"] = Field(
+        default="default", alias="KB_PDF_PARSER",
+        description="PDF 解析器: default (pdfplumber+PyMuPDF) | mineru (magic-pdf 深度学习版面分析)",
+    )
+    mineru_device: str = Field(
+        default="cpu", alias="MINERU_DEVICE",
+        description="MinerU 推理设备: cpu | cuda | cuda:0 等",
+    )
+    mineru_models_dir: str = Field(
+        default="", alias="MINERU_MODELS_DIR",
+        description="MinerU 模型下载/缓存目录（留空使用默认路径）",
+    )
+    mineru_enable_table_recognition: bool = Field(
+        default=True, alias="MINERU_ENABLE_TABLE_RECOGNITION",
+        description="MinerU 是否启用表格识别",
     )
     kb_page_ocr_fallback: bool = Field(
         default=True, alias="KB_PAGE_OCR_FALLBACK",

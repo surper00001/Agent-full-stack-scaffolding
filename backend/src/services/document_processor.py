@@ -30,8 +30,10 @@ from src.services.document_analyzer import (
     DocumentTypeAnalyzer,
     HeadingNode,
 )
+from src.services.document_processors.layout import DocxStyleTagger, LayoutTag
 from src.services.document_processors.pdf import PDFMixin
 from src.services.document_processors.table_utils import TableUtilsMixin
+from src.services.vlm_service import get_vlm_service
 
 if TYPE_CHECKING:
     from src.services.file_storage import FileStorageService
@@ -110,7 +112,65 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
 
         return blocks, page_count, metadata, doc_structure
 
-    # ---- PDF 处理 ----
+    def _process_pdf(self, file_path: str) -> tuple[list[StructuredBlock], int, dict]:
+        """处理 PDF 文件，优先使用 MinerU，失败则回退到 pdfplumber 管线。"""
+        from src.services.document_processors.mineru import MinerUParser
+
+        # 尝试 MinerU（如果配置启用）
+        mineru = MinerUParser()
+        if mineru.available:
+            result = mineru.parse(file_path)
+            if result is not None:
+                blocks, page_count, metadata = result
+                logger.info(
+                    f"MinerU 解析成功: pages={page_count}, blocks={len(blocks)}"
+                )
+                # 仍然提取 PDF 内嵌图片并做 VLM OCR/描述（MinerU 可能漏图）
+                blocks = self._enrich_with_pdf_images(file_path, blocks)
+                return blocks, page_count, metadata
+
+        # 回退到默认 pdfplumber + PyMuPDF 管线
+        return PDFMixin._process_pdf_default(self, file_path)
+
+    def _enrich_with_pdf_images(
+        self, file_path: str, blocks: list[StructuredBlock]
+    ) -> list[StructuredBlock]:
+        """从 PDF 提取内嵌图片，追加为 image blocks（用于 MinerU 后补充 VLM OCR/描述）。"""
+        import fitz
+
+        doc = fitz.open(file_path)
+        try:
+            for page_num in range(doc.page_count):
+                page = doc[page_num]
+                image_list = page.get_images(full=True)
+                for img_info in image_list:
+                    xref = img_info[0]
+                    try:
+                        base_image = doc.extract_image(xref)
+                        img_rects = page.get_image_rects(img_info)
+                        bbox = None
+                        if img_rects:
+                            rect = img_rects[0]
+                            bbox = (rect.x0, rect.y0, rect.x1, rect.y1)
+                        caption = self._detect_image_caption(
+                            blocks, page_num + 1, bbox
+                        )
+                        blocks.append(self._build_image_block(
+                            page_num=page_num + 1,
+                            img_bytes=base_image["image"],
+                            ext=base_image.get("ext", "png"),
+                            bbox=bbox,
+                            caption=caption,
+                        ))
+                    except Exception as e:
+                        logger.debug(f"PDF 图片提取失败 (page={page_num + 1}, xref={xref}): {e}")
+        finally:
+            doc.close()
+
+        blocks.sort(key=lambda b: (b.page_number, b.bbox[1] if b.bbox else 999999))
+        return blocks
+
+    # ---- DOCX 处理 ----
 
     def _process_docx(self, file_path: str) -> tuple[list[StructuredBlock], int, dict]:
         from docx import Document
@@ -137,7 +197,6 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                     para = doc.paragraphs[para_idx]
                     para_idx += 1
 
-                    # 检测显式分页符（<w:br w:type="page"/> 或 <w:lastRenderedPageBreak/>）
                     for run in para.runs:
                         for br in run._element.findall(qn("w:br")):
                             if br.get(qn("w:type")) == "page":
@@ -147,7 +206,6 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                             current_page += 1
                             actual_page_count = max(actual_page_count, current_page)
 
-                    # 检测图片（DOCX 内嵌）
                     images_in_para = []
                     for run in para.runs:
                         for drawing in run._element.findall(qn("w:drawing")):
@@ -158,7 +216,6 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                                     try:
                                         rel = para.part.rels[embed]
                                         if "image" in rel.reltype:
-                                            # target_ref is like "media/image1.png" — extract extension
                                             ext = rel.target_ref.rsplit(".", 1)[-1] if "." in (rel.target_ref or "") else "png"
                                             images_in_para.append({
                                                 "bytes": rel.target_part.blob,
@@ -170,6 +227,8 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                     text = para.text
                     if text.strip():
                         is_heading = para.style.name.startswith("Heading") if para.style else False
+                        style_name = para.style.name if para.style else "Normal"
+                        layout_tag = DocxStyleTagger.tag(style_name).value
 
                         if is_heading:
                             current_section = text.strip()
@@ -178,6 +237,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                                 content=text.strip(),
                                 page_number=current_page,
                                 section_title=current_section,
+                                layout_tag=layout_tag,
                             ))
                         else:
                             blocks.append(StructuredBlock(
@@ -185,17 +245,19 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                                 content=text.strip(),
                                 page_number=current_page,
                                 section_title=current_section,
+                                layout_tag=layout_tag,
                             ))
 
-                    # 处理内嵌图片（无论 OCR 成败都保存并回溯）
                     for img_info in images_in_para:
-                        blocks.append(self._build_image_block(
+                        img_block = self._build_image_block(
                             page_num=current_page,
                             img_bytes=img_info["bytes"],
                             ext=img_info.get("ext", "png"),
                             caption=text.strip() if text.strip() else None,
                             section_title=current_section,
-                        ))
+                        )
+                        img_block.layout_tag = LayoutTag.IMAGE_REGION.value
+                        blocks.append(img_block)
 
             elif tag == "tbl" and para_idx < len(doc.tables):
                 table = doc.tables[para_idx % len(doc.tables)]
@@ -208,7 +270,6 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                     md = self._table_to_markdown(table_data)
                     html = self._table_to_html(table_data)
 
-                    # 检测表格标题（前一个段落）
                     table_caption = None
                     if para_idx > 1 and para_idx - 2 < len(doc.paragraphs):
                         prev_text = doc.paragraphs[para_idx - 2].text.strip()
@@ -223,6 +284,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                         table_data=table_data,
                         table_caption=table_caption,
                         section_title=current_section,
+                        layout_tag=LayoutTag.TABLE_BODY.value,
                     ))
 
         return blocks, actual_page_count, metadata
@@ -332,20 +394,51 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
         ocr_status = "disabled"
         ocr_error: str | None = None
         ocr_text = ""
+        vlm_description: str | None = None
+        vlm = get_vlm_service()
 
+        # 第一层：PaddleOCR（快速、离线）
         if self._settings.kb_ocr_enabled:
             ocr_text, ocr_error = self._ocr_image(img_bytes)
-            if ocr_error:
-                ocr_status = "failed"
-                content = "[图片] 未识别到文字，后续可接入多模态识别"
-            elif ocr_text.strip():
+            if ocr_text.strip():
                 ocr_status = "success"
-                content = f"[图片 OCR 结果] {ocr_text.strip()}"
+            elif ocr_error:
+                ocr_status = "failed"
             else:
                 ocr_status = "empty"
-                content = "[图片] 未识别到文字，后续可接入多模态识别"
+
+        # 第二层：VLM OCR 回退（对复杂版面/屏幕截图/艺术字更准）
+        if (not ocr_text.strip()) and vlm.enabled:
+            logger.info(f"PaddleOCR 未识别到文字 (status={ocr_status})，尝试 VLM OCR 回退")
+            vlm_text, vlm_err = vlm.ocr_image(img_bytes, ext)
+            if vlm_text.strip() and vlm_text.strip() != "无文字":
+                ocr_text = vlm_text
+                ocr_status = "vlm_success"
+                ocr_error = None
+                logger.info("VLM OCR 回退成功")
+            elif vlm_err:
+                if ocr_status in ("disabled", "empty"):
+                    ocr_status = "failed"
+                    ocr_error = f"PaddleOCR: {ocr_status}; VLM: {vlm_err}"
+
+        # 第三层：VLM 图像描述（无论 OCR 是否成功，补充语义信息）
+        if vlm.enabled:
+            try:
+                vlm_description, _ = vlm.describe_image(img_bytes, ext)
+                if vlm_description.strip():
+                    logger.info(f"VLM 图像描述生成成功: {vlm_description[:80]}...")
+            except Exception:
+                pass
+
+        # 构建最终内容
+        if ocr_text.strip():
+            content = f"[图片 OCR 结果] {ocr_text.strip()}"
+            if vlm_description and vlm_description.strip():
+                content += f"\n[图片描述] {vlm_description.strip()}"
+        elif vlm_description and vlm_description.strip():
+            content = f"[图片描述] {vlm_description.strip()}"
         else:
-            content = "[图片] 未识别到文字，后续可接入多模态识别"
+            content = "[图片] 未识别到文字"
 
         return StructuredBlock(
             block_type="image",
@@ -355,7 +448,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
             image_path=image_path,
             section_title=section_title,
             image_caption=caption,
-            image_description=ocr_text.strip() if ocr_text.strip() else None,
+            image_description=vlm_description or (ocr_text.strip() if ocr_text.strip() else None),
             ocr_status=ocr_status,
             ocr_error=ocr_error,
         )

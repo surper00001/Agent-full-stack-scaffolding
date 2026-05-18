@@ -29,8 +29,6 @@ export default function KnowledgeBaseDetailPage() {
     search,
     clearSearch,
     uploadProgressMap,
-    pollProgress,
-    clearUploadProgress,
     resumePollingForProcessing,
     indexNeedsReindex,
     reindexKB,
@@ -45,10 +43,7 @@ export default function KnowledgeBaseDetailPage() {
   useEffect(() => {
     fetchKB(kbId);
     fetchDocuments(kbId, 1, 50);
-    return () => {
-      clearUploadProgress();
-    };
-  }, [kbId, fetchKB, fetchDocuments, clearUploadProgress]);
+  }, [kbId, fetchKB, fetchDocuments]);
 
   useEffect(() => {
     if (documents.length > 0) {
@@ -61,19 +56,17 @@ export default function KnowledgeBaseDetailPage() {
       const files = e.target.files;
       if (!files || files.length === 0) return;
       setUploading(true);
-      try {
-        for (const file of Array.from(files)) {
-          const { docId } = await uploadDocument(kbId, file);
-          pollProgress(kbId, docId, file.name);
+      for (const file of Array.from(files)) {
+        try {
+          await uploadDocument(kbId, file);
+        } catch {
+          // 单个文件上传失败 — 进度卡片已展示错误，继续处理剩余文件
         }
-      } catch {
-        // upload failed — kbError 已写入 store
-      } finally {
-        setUploading(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
       }
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     },
-    [kbId, uploadDocument, pollProgress],
+    [kbId, uploadDocument],
   );
 
   const handleDelete = async (docId: string, filename: string) => {

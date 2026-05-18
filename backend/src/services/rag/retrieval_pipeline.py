@@ -51,7 +51,10 @@ class RetrievalPipeline:
         filters: dict[str, Any] | None = None,
         doc_repo: Any = None,
     ) -> dict[str, Any]:
-        """执行完整检索流程。"""
+        """执行完整检索流程（含全链路日志）。"""
+        # ═══ Step 1: Query ═══
+        logger.info(f"[检索 Step1] query='{query[:120]}' top_k={top_k} rerank={rerank}")
+
         embedding_model = kb.embedding_model or self._settings.kb_embedding_model
         reranker_model = kb.reranker_model or self._settings.kb_reranker_model
         strategy = get_embedding_strategy(embedding_model)
@@ -67,11 +70,13 @@ class RetrievalPipeline:
         embedding_svc = get_embedding_service(embedding_model)
         query_vector = await embedding_svc.embed_query(query, strategy=strategy)
 
+        # ═══ Step 2: Top-K Retrieval ═══
+        hybrid_used = (
+            self._hybrid_search is not None
+            and self._settings.kb_hybrid_search_enabled
+        )
         try:
-            if (
-                self._hybrid_search is not None
-                and self._settings.kb_hybrid_search_enabled
-            ):
+            if hybrid_used:
                 from src.db.repository import BaseRepository
                 from src.models.domain.knowledge_base import KBChunk
 
@@ -101,14 +106,26 @@ class RetrievalPipeline:
             raise VectorStoreError(f"向量检索失败: {e}") from e
 
         total_found = len(results)
+        logger.info(
+            f"[检索 Step2] 粗排完成: total_found={total_found} "
+            f"mode={'hybrid' if hybrid_used else 'vector'}"
+        )
+        if results:
+            self._log_top_results(results[:8], "Step2 粗排样本")
+
         if not results:
             return {"query": query, "results": [], "total_found": 0, "reranked": False}
 
+        # ═══ Step 3: Rerank ═══
         reranker = get_reranker_service(reranker_model)
         if rerank and len(results) > 0:
             candidate_texts = [
                 build_rerank_text(doc.metadata or {}, doc.page_content) for doc in results
             ]
+            logger.info(
+                f"[检索 Step3] 送入重排序: candidates={len(candidate_texts)} "
+                f"model={reranker_model}"
+            )
             reranked = await reranker.rerank(
                 query, candidate_texts, top_k=search_k, model_name=reranker_model
             )
@@ -118,7 +135,15 @@ class RetrievalPipeline:
                 (doc, self._doc_score(doc)) for doc in results[:search_k]
             ]
 
+        # ═══ Step 4: Dedup + MMR ═══
+        pre_dedup_count = len(sorted_results)
         sorted_results = self._deduplicate_results(sorted_results, top_k)
+        logger.info(
+            f"[检索 Step4] 去重/MMR: {pre_dedup_count} → {len(sorted_results)} "
+            f"(target top_k={top_k})"
+        )
+        if sorted_results:
+            self._log_top_results(sorted_results, "Step4 精排结果")
 
         doc_info_cache: dict[str, tuple[str, str, str]] = {}
         search_results: list[dict[str, Any]] = []
@@ -179,6 +204,7 @@ class RetrievalPipeline:
                     "section_path": meta.get("section_path", ""),
                     "content_summary": meta.get("content_summary", ""),
                     "doc_category": meta.get("doc_category", ""),
+                    "layout_tag": meta.get("layout_tag", ""),
                     "bbox": meta.get("bbox"),
                     "parent_context": parent_context if parent_context != doc.page_content else "",
                 },
@@ -186,12 +212,49 @@ class RetrievalPipeline:
                 "context_after": context_after,
             })
 
+        # ═══ Step 5: Final Context ═══
+        final_sources = [r.get("document_filename", "?") for r in search_results]
+        final_pages = [r.get("page_start", 0) for r in search_results]
+        final_scores = [r.get("score", 0) for r in search_results]
+        final_tags = [
+            (r.get("metadata_") or {}).get("layout_tag", "") or r.get("chunk_type", "")
+            for r in search_results
+        ]
+        logger.info(
+            f"[检索 Step5] 最终上下文: count={len(search_results)} "
+            f"scores={[f'{s:.3f}' for s in final_scores]} "
+            f"types={final_tags} "
+            f"sources={list(zip(final_sources, final_pages))}"
+        )
+
         return {
             "query": query,
             "results": search_results,
             "total_found": total_found,
             "reranked": rerank,
         }
+
+    @staticmethod
+    def _log_top_results(
+        items: list[tuple[Any, float]] | list[Any],
+        label: str,
+    ) -> None:
+        """打印前几条检索结果的关键信息。"""
+        top = items[:5]
+        for i, item in enumerate(top):
+            if isinstance(item, tuple):
+                doc, score = item
+            else:
+                doc, score = item, 0.0
+            meta = doc.metadata or {}
+            logger.info(
+                f"  [{label}] #{i + 1} score={score:.4f} "
+                f"src={meta.get('document_filename', '?') or meta.get('source', '?')} "
+                f"p{meta.get('page_start', 0)} "
+                f"type={meta.get('chunk_type', '?')} "
+                f"tag={meta.get('layout_tag', '')} "
+                f"text={doc.page_content[:100].replace(chr(10), ' ')}"
+            )
 
     def _deduplicate_results(
         self,

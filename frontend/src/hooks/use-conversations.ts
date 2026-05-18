@@ -1,54 +1,25 @@
 import { useState, useCallback } from "react";
 import type { Conversation } from "@/types";
 import * as conversationsApi from "@/api/conversations";
+import { useConversationStore } from "@/stores/conversation-store";
 
 /**
- * 对话列表 Hook — 手动触发的分页加载
+ * 对话列表 Hook — 委托到共享 Zustand store，保证侧边栏与聊天页状态一致。
  */
 export function useConversations() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [total, setTotal] = useState(0);
-
-  const fetchConversations = useCallback(
-    async (page = 1, pageSize = 20) => {
-      setIsLoading(true);
-      try {
-        const response = await conversationsApi.getConversations({
-          page,
-          page_size: pageSize,
-        });
-        setConversations(response.data.items);
-        setTotal(response.data.total);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [],
-  );
-
-  const createConversation = useCallback(
-    async (title?: string, agentType = "general", knowledgeBaseId?: string | null) => {
-      const response = await conversationsApi.createConversation({
-        title: title || "新对话",
-        agent_type: agentType,
-        knowledge_base_id: knowledgeBaseId || undefined,
-      });
-      setConversations((prev) => [response.data, ...prev]);
-      return response.data;
-    },
-    [],
-  );
-
-  const deleteConversation = useCallback(async (id: string) => {
-    await conversationsApi.deleteConversation(id);
-    setConversations((prev) => prev.filter((c) => c.id !== id));
-  }, []);
+  const {
+    conversations,
+    total,
+    loading,
+    fetchConversations,
+    createConversation,
+    deleteConversation,
+  } = useConversationStore();
 
   return {
     conversations,
     total,
-    isLoading,
+    isLoading: loading,
     fetchConversations,
     createConversation,
     deleteConversation,
