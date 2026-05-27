@@ -53,7 +53,18 @@ def decode_access_token(token: str) -> dict | None:
 
 
 def generate_refresh_token() -> tuple[str, str]:
-    """生成 Refresh Token（随机字符串），返回 (raw_token, token_hash)。"""
+    """生成 Refresh Token（随机字符串 + SHA-256 哈希）。
+
+    Refresh Token 本身已是 256 位高熵随机串，使用 SHA-256 做确定性哈希
+    （非 bcrypt），保证刷新时相同输入→相同哈希，可精确查库匹配。
+    """
     raw = secrets.token_urlsafe(32)
-    token_hash = hash_password(raw)
+    token_hash = hash_refresh_token(raw)
     return raw, token_hash
+
+
+def hash_refresh_token(raw: str) -> str:
+    """计算 Refresh Token 的 SHA-256 哈希（确定性，用于查库匹配）。"""
+    import hashlib
+
+    return hashlib.sha256(raw.encode()).hexdigest()

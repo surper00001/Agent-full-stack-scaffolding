@@ -1,6 +1,6 @@
 """用户领域模型。"""
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import BigInteger, Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import BaseModel
@@ -31,6 +31,9 @@ class User(BaseModel):
     )
     role: Mapped[str] = mapped_column(
         String(16), default="user", nullable=False, comment="角色: admin | user"
+    )
+    token_quota: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True, comment="Token 配额上限（null=无限制）"
     )
 
     @property

@@ -13,6 +13,9 @@ import { API_BASE_URL, CONTEXT_MAX_TOKENS } from "@/lib/constants";
 import type { ContextUsageSnapshot, ToolCall } from "@/types";
 import { useKBStore, useConversationStore } from "@/stores";
 import { CitationCards, parseKBCitations, parseCitationsFromArray, type KBCitation } from "@/components/kb/citation-cards";
+import { InlineImageMessage } from "@/components/kb/inline-image-message";
+import { MindMapRenderer, type MindMap } from "@/components/kb/mindmap-renderer";
+import { extractMindmapFromMetadata, parseMindmapFromContent } from "@/components/kb/mindmap-utils";
 
 // ---- Types ----
 
@@ -39,6 +42,7 @@ interface LocalMessage {
   tool_calls?: ToolCall[];
   files?: FileOutput[];
   citations?: KBCitation[];
+  mindmap?: MindMap;
 }
 
 // ---- Helpers ----
@@ -92,12 +96,17 @@ function mapMessageToLocal(m: {
   metadata_?: Record<string, unknown> | null;
 }): LocalMessage {
   const citations = parseCitationsFromArray(m.metadata_?.citations);
+  // 优先从 metadata 取 mindmap，否则从内容末尾 JSON 代码块解析
+  const mindmap =
+    extractMindmapFromMetadata(m.metadata_ as Record<string, unknown> | null | undefined) ||
+    parseMindmapFromContent(m.content);
   return {
     id: m.id,
     role: m.role as LocalMessage["role"],
     content: m.content,
     created_at: m.created_at,
     citations: citations.length > 0 ? citations : undefined,
+    mindmap: mindmap || undefined,
   };
 }
 
@@ -187,6 +196,7 @@ export default function ChatDetailPage() {
   // File outputs in current stream
   const [liveFiles, setLiveFiles] = useState<FileOutput[]>([]);
   const [liveCitations, setLiveCitations] = useState<KBCitation[]>([]);
+  const [liveMindmap, setLiveMindmap] = useState<MindMap | null>(null);
 
   // 知识库选择（Agent/Plan 模式可用）
   const [activeKbId, setActiveKbId] = useState<string | null>(null);
@@ -456,11 +466,14 @@ export default function ChatDetailPage() {
         }
       }
       if (full) {
+        const parsedMindmap = parseMindmapFromContent(full);
+        if (parsedMindmap) setLiveMindmap(parsedMindmap);
         setMessages((prev) => [...prev, {
           id: crypto.randomUUID(), role: "assistant", content: full,
           created_at: new Date().toISOString(),
           files: files.length > 0 ? files : undefined,
           citations: messageCitations.length > 0 ? messageCitations : undefined,
+          mindmap: parsedMindmap || undefined,
         }]);
         refreshConversations();
       }
@@ -476,6 +489,7 @@ export default function ChatDetailPage() {
       setLiveToolCalls([]);
       setLiveFiles([]);
       setLiveCitations([]);
+      setLiveMindmap(null);
       setPlanSteps([]);
       abortRef.current = null;
     }
@@ -643,6 +657,16 @@ export default function ChatDetailPage() {
             {msg.citations && msg.citations.length > 0 && (
               <CitationCards citations={msg.citations} />
             )}
+            {msg.mindmap && (
+              <div className="px-4 pb-2">
+                <div className="max-w-[75%] ml-11">
+                  <MindMapRenderer
+                    data={msg.mindmap}
+                    onSendMessage={(cmd) => handleSend(undefined, cmd)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         ))}
 
@@ -657,6 +681,17 @@ export default function ChatDetailPage() {
 
         {liveCitations.length > 0 && isStreaming && (
           <CitationCards citations={liveCitations} />
+        )}
+
+        {liveMindmap && isStreaming && (
+          <div className="px-4 pb-2">
+            <div className="max-w-[75%] ml-11">
+              <MindMapRenderer
+                data={liveMindmap}
+                onSendMessage={(cmd) => handleSend(undefined, cmd)}
+              />
+            </div>
+          </div>
         )}
 
         {/* Streaming message with typing cursor */}
@@ -1094,6 +1129,12 @@ function MessageBubble({
         )}>
           {isUser ? (
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          ) : message.citations && message.citations.length > 0 ? (
+            <InlineImageMessage
+              text={message.content}
+              citations={message.citations}
+              renderMarkdown={(t) => <SimpleMarkdown text={t} />}
+            />
           ) : (
             <SimpleMarkdown text={message.content} />
           )}

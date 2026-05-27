@@ -12,15 +12,17 @@ Tools:    支持 tool_search 元工具做动态工具发现
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph, add_messages
-from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 from typing_extensions import TypedDict
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
+    from langgraph.graph.state import CompiledStateGraph
 
 
 class PlanStep(TypedDict, total=False):

@@ -88,5 +88,13 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def close_db_engine() -> None:
-    """关闭数据库引擎（应用关闭时调用）。"""
-    await _engine.dispose()
+    """关闭数据库引擎（应用关闭时调用）。
+
+    优雅处理事件循环已关闭的情况，避免 shutdown 时产生噪音日志。
+    """
+    import asyncio
+
+    try:
+        await asyncio.wait_for(_engine.dispose(), timeout=5)
+    except (asyncio.TimeoutError, RuntimeError, ConnectionResetError):
+        pass  # 事件循环正在关闭或连接已不可达，忽略

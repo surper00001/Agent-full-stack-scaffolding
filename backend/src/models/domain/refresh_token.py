@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import UUID, Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.db.base import UUIDPrimaryKeyMixin, Base
+from src.db.base import Base, UUIDPrimaryKeyMixin
 
 
 class RefreshToken(UUIDPrimaryKeyMixin, Base):

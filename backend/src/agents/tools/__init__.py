@@ -24,6 +24,12 @@ from src.agents.tools.meta import (
     register_tool_meta,
     tool_search,
 )
+from src.agents.tools.mindmap import (
+    edit_mindmap,
+    export_mindmap,
+    fetch_url_outline,
+    generate_mindmap,
+)
 from src.agents.tools.output import save_markdown_file, save_srt_subtitle, save_text_file
 
 # 组装完整工具列表
@@ -38,6 +44,10 @@ _ALL_TOOLS = [
     save_markdown_file,
     save_text_file,
     save_srt_subtitle,
+    generate_mindmap,
+    edit_mindmap,
+    export_mindmap,
+    fetch_url_outline,
     tool_search,
 ]
 
@@ -56,6 +66,10 @@ __all__ = [
     "save_markdown_file",
     "save_text_file",
     "save_srt_subtitle",
+    "generate_mindmap",
+    "edit_mindmap",
+    "export_mindmap",
+    "fetch_url_outline",
     "tool_search",
     "get_default_tools",
     "get_tool_registry",

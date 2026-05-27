@@ -32,6 +32,8 @@ export interface Conversation {
   status: string;
   knowledge_base_id?: string | null;
   knowledge_base_name?: string | null;
+  user_id?: string | null;
+  username?: string | null;
   /** 详情接口不内嵌消息，需单独调用 messages/cursor */
   messages?: Message[];
   created_at: string;
@@ -55,6 +57,7 @@ export interface SendMessageRequest {
   mode?: ChatMode;
   plan_model?: string | null;
   knowledge_base_id?: string | null;
+  image_ids?: string[] | null;
 }
 
 /** 上下文使用统计 */

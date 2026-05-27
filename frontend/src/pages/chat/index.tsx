@@ -158,7 +158,7 @@ export default function ChatHomePage() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-medium text-xs">{agent.name}</h3>
                         <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-1">
-                          {agent.agent_type === "creative" ? "AI 短视频创作顾问团" : agent.agent_type}
+                          {agent.agent_type === "creative" ? "AI 短视频创作顾问团" : agent.agent_type === "mindmap" ? "思维导图生成与编辑助手" : agent.agent_type}
                         </p>
                       </div>
                       <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/20 opacity-0 transition-all group-hover:opacity-100 group-hover:text-primary group-hover:translate-x-0.5" />

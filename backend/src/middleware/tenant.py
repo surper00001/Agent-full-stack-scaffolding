@@ -26,10 +26,10 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
         if settings.multi_tenant_enabled:
             tenant_id = request.headers.get(
-                settings.tenant_header_name, settings.deafult_tenant_id
+                settings.tenant_header_name, settings.default_tenant_id
             )
         else:
-            tenant_id = settings.deafult_tenant_id
+            tenant_id = settings.default_tenant_id
 
         # 注入到请求状态
         request.state.tenant_id = tenant_id

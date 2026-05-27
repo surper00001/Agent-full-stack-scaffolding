@@ -21,6 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# PaddlePaddle on Windows: 必须在任何 Paddle 导入之前禁用 OneDNN/MKL-DNN，
+# 否则 PIR 图优化阶段会报 ConvertPirAttribute2RuntimeAttribute 错误
+os.environ["FLAGS_use_onednn"] = "0"  # noqa: SIM112
+os.environ["FLAGS_use_mkldnn"] = "0"  # noqa: SIM112
+
 from loguru import logger
 
 from src.core.config import get_settings
@@ -37,6 +42,19 @@ from src.services.vlm_service import get_vlm_service
 
 if TYPE_CHECKING:
     from src.services.file_storage import FileStorageService
+
+
+def _table_data_to_md(data: list[list[str]]) -> str:
+    """二维列表 → Markdown 表格（用于 embedding text）。"""
+    if not data:
+        return ""
+    rows = []
+    for i, row in enumerate(data):
+        cleaned = [str(c).replace("\n", " ").replace("|", "\\|").strip() for c in row]
+        rows.append("| " + " | ".join(cleaned) + " |")
+        if i == 0:
+            rows.append("| " + " | ".join(["---"] * len(cleaned)) + " |")
+    return "\n".join(rows)
 
 
 @dataclass
@@ -101,6 +119,33 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
         # 将章节信息回填到 block
         blocks = self._enrich_blocks_with_structure(blocks, doc_structure)
 
+        # 图文交叉引用锚点解析（「如图 3-2」→ 匹配实际图片块）
+        from src.services.cross_reference_resolver import CrossReferenceResolver
+        blocks = CrossReferenceResolver.resolve(blocks)
+
+        # 列表嵌套结构分析（缩进层级 + 有序/无序区分）
+        from src.services.document_processors.layout import enrich_list_structure
+        blocks = enrich_list_structure(blocks)
+
+        # 脚注/尾注链接（正文标记 → 脚注内容匹配）
+        from src.services.footnote_resolver import FootnoteResolver
+        blocks = FootnoteResolver.resolve(blocks)
+
+        # 跨页模板噪声去重（重复水印、警告语、版权声明等）
+        from src.services.document_processors.table_utils import TableUtilsMixin
+        blocks = TableUtilsMixin._deduplicate_template_noise(blocks)
+
+        # 深度元数据提取（DOI、摘要、关键词、作者等）
+        from src.services.metadata_extractor import MetadataExtractor
+        deep_meta = MetadataExtractor.extract(blocks, page_count, ext.lstrip("."))
+        metadata["deep_metadata"] = deep_meta.to_dict()
+        if deep_meta.title and not metadata.get("title"):
+            metadata["title"] = deep_meta.title
+        if deep_meta.authors and not metadata.get("author"):
+            metadata["author"] = "; ".join(deep_meta.authors)
+        if deep_meta.doi:
+            metadata["doi"] = deep_meta.doi
+
         logger.info(
             f"文档分析完成: 类型={doc_structure.category.value} "
             f"(置信度={doc_structure.confidence:.0%}), "
@@ -125,12 +170,56 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                 logger.info(
                     f"MinerU 解析成功: pages={page_count}, blocks={len(blocks)}"
                 )
+                # 将 MinerU 临时目录中的图片持久化到缩略图目录
+                blocks = self._persist_mineru_images(blocks)
                 # 仍然提取 PDF 内嵌图片并做 VLM OCR/描述（MinerU 可能漏图）
                 blocks = self._enrich_with_pdf_images(file_path, blocks)
                 return blocks, page_count, metadata
 
         # 回退到默认 pdfplumber + PyMuPDF 管线
         return PDFMixin._process_pdf_default(self, file_path)
+
+    def _persist_mineru_images(
+        self, blocks: list[StructuredBlock]
+    ) -> list[StructuredBlock]:
+        """将 MinerU 临时目录中的图片拷贝到缩略图目录，更新 image_path。
+
+        MinerU 解析时 image_path 指向其临时输出目录（hash 文件名），
+        这些文件可能被清理，需要持久化到 thumbnails 目录供前端访问。
+        """
+        if not self._save_ctx:
+            return blocks
+
+        from pathlib import Path
+
+        idx = 0
+        for block in blocks:
+            if block.block_type != "image" or not block.image_path:
+                continue
+            idx += 1
+            src = Path(block.image_path)
+            if not src.exists():
+                logger.warning(f"MinerU 图片源文件已不存在: {src}")
+                continue
+            try:
+                img_bytes = src.read_bytes()
+                ext = src.suffix.lstrip(".") or "png"
+                page_num = block.page_number or 1
+                new_path = self._storage.save_thumbnail(
+                    self._save_ctx.tenant_id,
+                    self._save_ctx.user_id,
+                    self._save_ctx.kb_id,
+                    self._save_ctx.doc_id,
+                    page_num,
+                    idx,
+                    img_bytes,
+                    ext,
+                )
+                object.__setattr__(block, "image_path", new_path)
+            except Exception as e:
+                logger.warning(f"MinerU 图片持久化失败: {e}")
+
+        return blocks
 
     def _enrich_with_pdf_images(
         self, file_path: str, blocks: list[StructuredBlock]
@@ -189,6 +278,14 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
         para_idx = 0
         current_section: str | None = None
 
+        # 章节层级追踪
+        heading_stack: list[tuple[int, str]] = []  # [(level, title), ...]
+
+        def _build_section_path() -> str | None:
+            if not heading_stack:
+                return None
+            return " > ".join(title for _, title in heading_stack)
+
         for element in doc.element.body:
             tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
 
@@ -197,6 +294,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                     para = doc.paragraphs[para_idx]
                     para_idx += 1
 
+                    # 检测显式分页
                     for run in para.runs:
                         for br in run._element.findall(qn("w:br")):
                             if br.get(qn("w:type")) == "page":
@@ -206,6 +304,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                             current_page += 1
                             actual_page_count = max(actual_page_count, current_page)
 
+                    # 提取段落内图片
                     images_in_para = []
                     for run in para.runs:
                         for drawing in run._element.findall(qn("w:drawing")):
@@ -231,12 +330,24 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                         layout_tag = DocxStyleTagger.tag(style_name).value
 
                         if is_heading:
+                            # 提取标题级别并维护层级栈
+                            level_str = style_name.replace("Heading", "").strip()
+                            try:
+                                level = int(level_str)
+                            except ValueError:
+                                level = 1
                             current_section = text.strip()
+                            # 弹出同级别及更低级别的标题
+                            while heading_stack and heading_stack[-1][0] >= level:
+                                heading_stack.pop()
+                            heading_stack.append((level, current_section))
+
                             blocks.append(StructuredBlock(
                                 block_type="text",
                                 content=text.strip(),
                                 page_number=current_page,
                                 section_title=current_section,
+                                section_path=_build_section_path(),
                                 layout_tag=layout_tag,
                             ))
                         else:
@@ -245,6 +356,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                                 content=text.strip(),
                                 page_number=current_page,
                                 section_title=current_section,
+                                section_path=_build_section_path(),
                                 layout_tag=layout_tag,
                             ))
 
@@ -259,16 +371,62 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                         img_block.layout_tag = LayoutTag.IMAGE_REGION.value
                         blocks.append(img_block)
 
-            elif tag == "tbl" and para_idx < len(doc.tables):
-                table = doc.tables[para_idx % len(doc.tables)]
-                table_data = []
-                for row in table.rows:
-                    row_data = [cell.text.strip() for cell in row.cells]
+            elif tag == "tbl":
+                # 直接从 XML 元素提取表格（避免 python-docx 跳过合并单元格）
+                table_rows = element.findall(qn("w:tr"))
+                table_data: list[list[str]] = []
+                colspans: list[list[int]] = []
+                rowspans: list[list[int]] = []
+
+                # vMerge 跨行状态追踪
+                vmerge_tracker: dict[int, str] = {}  # col_idx -> "restart" | "continue"
+
+                for row_el in table_rows:
+                    cells = row_el.findall(qn("w:tc"))
+                    row_data: list[str] = []
+                    row_cs: list[int] = []
+                    row_rs: list[int] = []
+
+                    col_idx = 0
+                    for cell_el in cells:
+                        # gridSpan (colspan)
+                        grid_span_el = cell_el.find(qn("w:tcPr") + "/" + qn("w:gridSpan")) if cell_el.find(qn("w:tcPr")) is not None else None
+                        cs = int(grid_span_el.get(qn("w:val"), "1")) if grid_span_el is not None else 1
+
+                        # vMerge (rowspan)
+                        vmerge_el = cell_el.find(qn("w:tcPr") + "/" + qn("w:vMerge")) if cell_el.find(qn("w:tcPr")) is not None else None
+                        rs = 1
+                        if vmerge_el is not None:
+                            vmerge_val = vmerge_el.get(qn("w:val"))
+                            if vmerge_val == "restart":
+                                vmerge_tracker[col_idx] = "restart"
+                            elif vmerge_val is None or vmerge_val == "continue":
+                                if col_idx in vmerge_tracker:
+                                    rs = 0  # 被合并到上一行
+                                vmerge_tracker[col_idx] = "continue"
+
+                        # 提取纯文本
+                        text_parts = []
+                        for p_el in cell_el.findall(qn("w:p")):
+                            t_els = p_el.findall(".//" + qn("w:t"))
+                            line = "".join(t.text or "" for t in t_els)
+                            if line:
+                                text_parts.append(line)
+                        cell_text = "\n".join(text_parts).strip()
+
+                        row_data.append(cell_text)
+                        row_cs.append(cs)
+                        row_rs.append(rs)
+
+                        col_idx += cs  # 按 gridSpan 推进列索引
+
                     table_data.append(row_data)
+                    colspans.append(row_cs)
+                    rowspans.append(row_rs)
 
                 if table_data and len(table_data) >= 2:
                     md = self._table_to_markdown(table_data)
-                    html = self._table_to_html(table_data)
+                    html = self._table_to_html(table_data, colspans=colspans, rowspans=rowspans)
 
                     table_caption = None
                     if para_idx > 1 and para_idx - 2 < len(doc.paragraphs):
@@ -281,9 +439,10 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                         content=md,
                         page_number=current_page,
                         table_html=html,
-                        table_data=table_data,
+                        table_data=table_data if table_data else None,
                         table_caption=table_caption,
                         section_title=current_section,
+                        section_path=_build_section_path(),
                         layout_tag=LayoutTag.TABLE_BODY.value,
                     ))
 
@@ -376,6 +535,17 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
         self._img_counter += 1
         img_idx = self._img_counter
 
+        # 提取原始尺寸
+        img_width, img_height = None, None
+        try:
+            from io import BytesIO
+
+            from PIL import Image
+            with Image.open(BytesIO(img_bytes)) as pil_img:
+                img_width, img_height = pil_img.size
+        except Exception:
+            pass
+
         if image_path is None and self._save_ctx:
             try:
                 image_path = self._storage.save_thumbnail(
@@ -430,34 +600,75 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
             except Exception:
                 pass
 
+        # 第四层：VLM 表格检测（识别图片中的表格并提取结构化数据）
+        table_html = None
+        table_data = None
+        is_table_image = False
+        table_caption = caption  # 优先用检测到的 caption
+        if vlm.enabled:
+            try:
+                table_result = vlm.detect_table_in_image(img_bytes, ext)
+                if table_result:
+                    table_html = table_result["table_html"]
+                    table_data = table_result["table_data"]
+                    is_table_image = True
+                    table_caption = table_result.get("table_caption") or caption
+                    logger.info(
+                        f"VLM 检测到图片中的表格: rows={len(table_data)}"
+                    )
+            except Exception:
+                pass
+
         # 构建最终内容
-        if ocr_text.strip():
-            content = f"[图片 OCR 结果] {ocr_text.strip()}"
+        if is_table_image and table_html:
+            # 图片中包含表格：以表格为主，图片描述为辅
+            table_md = _table_data_to_md(table_data) if table_data else ""
+            content = f"[表格(图片提取)] {table_caption or ''}\n{table_md}"
             if vlm_description and vlm_description.strip():
                 content += f"\n[图片描述] {vlm_description.strip()}"
+            block_type = "table"
         elif vlm_description and vlm_description.strip():
             content = f"[图片描述] {vlm_description.strip()}"
+            if ocr_text.strip():
+                content += f"\n[OCR] {ocr_text.strip()[:500]}"
+            block_type = "image"
+        elif ocr_text.strip():
+            content = f"[图片文字] {ocr_text.strip()[:500]}"
+            block_type = "image"
         else:
             content = "[图片] 未识别到文字"
+            block_type = "image"
 
         return StructuredBlock(
-            block_type="image",
+            block_type=block_type,
             content=content,
             page_number=page_num,
             bbox=bbox,
+            table_html=table_html,
+            table_data=table_data,
             image_path=image_path,
             section_title=section_title,
-            image_caption=caption,
-            image_description=vlm_description or (ocr_text.strip() if ocr_text.strip() else None),
+            image_caption=caption if block_type == "image" else None,
+            image_description=vlm_description if block_type == "image" else (
+                vlm_description or None
+            ),
+            table_caption=table_caption if block_type == "table" else None,
             ocr_status=ocr_status,
             ocr_error=ocr_error,
+            image_width=img_width,
+            image_height=img_height,
         )
 
     def _ocr_image(self, image_bytes: bytes) -> tuple[str, str | None]:
         """OCR 识别，返回 (文本, 错误信息)。"""
         if self._ocr is None:
             try:
-                os.environ.setdefault("FLAGS_use_onednn", "0")
+                # 限制 PaddlePaddle CPU 线程数，避免吃满全部核心
+                try:
+                    import paddle
+                    paddle.set_device("cpu")
+                except Exception:
+                    pass
                 from paddleocr import PaddleOCR
                 logger.info(f"初始化 PaddleOCR (lang={self._settings.kb_ocr_lang})")
                 self._ocr = PaddleOCR(
@@ -547,6 +758,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
             r"^[（(][一二三四五六七八九十\d]+[）)]\s*(.+)",
             r"^(?:Chapter|Section|Part)\s+\d+[.:]?\s*(.+)",
             r"^(?:ABSTRACT|INTRODUCTION|REFERENCES)\b",
+            r"^(?:参考文献|参考书目|引用文献|Bibliography|Works\s+Cited|Reference\s+List)\s*$",
         ]
         for pattern in patterns:
             m = re.match(pattern, first_line)

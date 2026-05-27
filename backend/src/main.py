@@ -5,10 +5,28 @@ FastAPI 应用工厂：配置路由、中间件、异常处理和生命周期事
 使用 Scalar 作为 API 文档 UI（中文界面）。
 """
 
+import os
 from contextlib import asynccontextmanager
 
+# ── CPU 线程限制（必须在任何 torch / paddle 导入之前设置）──
+# 24 核 CPU 上 PyTorch 默认全核心并行，多个模型同时跑时 CPU 被打满且因
+# cache thrashing 反而更慢。限制每个模型 4 线程，留出余量给系统和其他进程。
+_CPU_THREADS = 4
+for _env_key in (
+    "OMP_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+):
+    os.environ.setdefault(_env_key, str(_CPU_THREADS))
+# PaddlePaddle 也需要限制，否则 OCR 会独立占满所有核心
+os.environ.setdefault("GOTRACEBACK", "crash")  # 不影响线程，只是占位
+
+# 以下导入必须在环境变量设置之后（torch/paddle 需在 import 前设置线程数）
+# ruff: noqa: E402
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 
 from src.api.router import api_v1_router
@@ -36,14 +54,36 @@ async def lifespan(app: FastAPI):
     setup_monitoring()
 
     # HuggingFace 镜像与 Token（Embedding/Reranker 模型下载）
-    import os
-
     if settings.hf_endpoint:
         os.environ.setdefault("HF_ENDPOINT", settings.hf_endpoint)
     hf_token = settings.hf_token.get_secret_value()
     if hf_token:
         os.environ.setdefault("HF_TOKEN", hf_token)
         os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", hf_token)
+
+    # GPU 配置：CUDA 缓存和显存限制必须在 torch 首次使用前设置
+    # PYTORCH_CUDA_ALLOC_CONF 和 TORCH_HOME 必须在 import torch 之前设置！
+    _cache_d = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "tools", ".cache", "torch",
+    )
+    os.environ.setdefault("TORCH_HOME", _cache_d)
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    _gpu_available = False
+    try:
+        import torch
+        if torch.cuda.is_available():
+            _gpu_available = True
+            _vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            _gpu_name = torch.cuda.get_device_name(0)
+            # 限制显存占用，给桌面/Ollama 留余量
+            _mem_frac = settings.kb_gpu_memory_fraction
+            torch.cuda.set_per_process_memory_fraction(_mem_frac)
+            torch.cuda.empty_cache()
+        else:
+            _gpu_available = False
+    except Exception:
+        _gpu_available = False
 
     from loguru import logger
 
@@ -54,6 +94,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"   LLM 提供商: {settings.llm_provider}")
     logger.info(f"   多租户: {'启用' if settings.multi_tenant_enabled else '禁用'}")
     logger.info(f"   监测: {'启用' if settings.monitoring_enabled else '禁用'} ({settings.monitoring_provider})")
+    if _gpu_available:
+        logger.info(f"   GPU: {_gpu_name} ({_vram_gb:.1f}GB), 显存限制 {_mem_frac*100:.0f}%")
+    else:
+        logger.info(f"   GPU: 不可用，使用 CPU 推理")
 
     # 开发环境：自动创建数据库表（生产环境请使用 Alembic 迁移）
     if settings.app_env != "production":
@@ -71,32 +115,55 @@ async def lifespan(app: FastAPI):
 
     # 确保新字段存在（开发环境简易迁移：自动补齐缺失列）
     try:
-        from src.db.session import _engine
         from sqlalchemy import text
 
+        from src.db.session import _engine
+
         async with _engine.begin() as conn:
-            # users.role
-            try:
-                await conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'user'"))
-                logger.info("   已添加 users.role 列")
-            except Exception:
-                pass  # 列已存在
 
-            # conversations.user_id
-            try:
-                await conn.execute(text("ALTER TABLE conversations ADD COLUMN user_id VARCHAR(64)"))
-                logger.info("   已添加 conversations.user_id 列")
-            except Exception:
-                pass  # 列已存在
+            async def _add_column_if_missing(
+                table: str, column: str, col_def: str,
+            ) -> None:
+                """安全添加列：先检查是否存在，避免静默失败。"""
+                try:
+                    result = await conn.execute(
+                        text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name = :tbl AND column_name = :col"
+                        ),
+                        {"tbl": table, "col": column},
+                    )
+                    if result.fetchone() is None:
+                        await conn.execute(
+                            text(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+                        )
+                        logger.info(f"   已添加 {table}.{column} 列")
+                except Exception as e:
+                    # information_schema 不可用（如 SQLite），回退到 try-except
+                    try:
+                        await conn.execute(
+                            text(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+                        )
+                        logger.info(f"   已添加 {table}.{column} 列")
+                    except Exception:
+                        pass  # 列已存在（SQLite 不支持 IF NOT EXISTS）
 
-            # conversations.knowledge_base_id
-            try:
-                await conn.execute(
-                    text("ALTER TABLE conversations ADD COLUMN knowledge_base_id VARCHAR(64)")
-                )
-                logger.info("   已添加 conversations.knowledge_base_id 列")
-            except Exception:
-                pass  # 列已存在
+            await _add_column_if_missing(
+                "users", "role",
+                "role VARCHAR(16) NOT NULL DEFAULT 'user'",
+            )
+            await _add_column_if_missing(
+                "conversations", "user_id",
+                "user_id VARCHAR(64)",
+            )
+            await _add_column_if_missing(
+                "conversations", "knowledge_base_id",
+                "knowledge_base_id VARCHAR(64)",
+            )
+            await _add_column_if_missing(
+                "users", "token_quota",
+                "token_quota BIGINT",
+            )
             try:
                 await conn.execute(
                     text(
@@ -109,42 +176,52 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"   自动迁移跳过: {e}")
 
-    # 确保默认管理员账号存在
+    # 确保默认管理员账号存在（凭据从配置读取，不再硬编码）
     try:
-        from src.db.session import AsyncSessionLocal
-        from src.core.security import hash_password
-        from src.models.domain.user import User
         from sqlalchemy import select
 
+        from src.core.security import hash_password
+        from src.db.session import AsyncSessionLocal
+        from src.models.domain.user import User
+
+        admin_username = settings.admin_username
+        admin_password = settings.admin_password.get_secret_value()
+        admin_email = settings.admin_email
+
         async with AsyncSessionLocal() as seed_session:
-            stmt = select(User).where(User.username == "admin_tt")
+            stmt = select(User).where(User.username == admin_username)
             result = await seed_session.execute(stmt)
             existing = result.scalar_one_or_none()
             if existing is None:
                 admin = User(
-                    username="admin_tt",
-                    hashed_password=hash_password("Tt149212!!!"),
-                    email="admin@agent-platform.local",
+                    username=admin_username,
+                    hashed_password=hash_password(admin_password),
+                    email=admin_email,
                     is_active=True,
                     is_verified=True,
                     role="admin",
                 )
                 seed_session.add(admin)
                 await seed_session.commit()
-                logger.info("   默认管理员 admin_tt 已创建")
+                logger.info(f"   默认管理员 {admin_username} 已创建")
             elif existing.role != "admin":
                 existing.role = "admin"
                 await seed_session.commit()
-                logger.info("   已将 admin_tt 提升为管理员")
+                logger.info(f"   已将 {admin_username} 提升为管理员")
     except Exception as e:
         logger.warning(f"   管理员种子数据创建跳过: {e}")
 
     # 确保默认智能体配置存在
     try:
+        from sqlalchemy import select
+
+        from src.agents.prompts import (
+            CREATIVE_ADVISOR_PROMPT,
+            GENERAL_AGENT_PROMPT,
+            MINDMAP_SYSTEM_PROMPT,
+        )
         from src.db.session import AsyncSessionLocal as _AgentSession
         from src.models.domain.agent import AgentConfig
-        from src.agents.prompts import CREATIVE_ADVISOR_PROMPT, GENERAL_AGENT_PROMPT
-        from sqlalchemy import select
 
         async with _AgentSession() as seed_session:
             # 综合智能体（默认）
@@ -184,6 +261,25 @@ async def lifespan(app: FastAPI):
                 seed_session.add(agent)
                 await seed_session.commit()
                 logger.info("   默认智能体「创意导演·五人顾问团」已创建")
+
+            # 思维导图助手（专业智能体）
+            stmt = select(AgentConfig).where(
+                AgentConfig.agent_type == "mindmap",
+                AgentConfig.is_deleted == False,  # noqa: E712
+            )
+            result = await seed_session.execute(stmt)
+            if result.scalar_one_or_none() is None:
+                agent = AgentConfig(
+                    name="思维导图助手",
+                    agent_type="mindmap",
+                    system_prompt=MINDMAP_SYSTEM_PROMPT,
+                    model_name="deepseek-chat",
+                    temperature=0.7,
+                    tenant_id="default",
+                )
+                seed_session.add(agent)
+                await seed_session.commit()
+                logger.info("   默认智能体「思维导图助手」已创建")
     except Exception as e:
         logger.warning(f"   智能体种子数据创建跳过: {e}")
 
@@ -192,14 +288,22 @@ async def lifespan(app: FastAPI):
 
     await init_checkpointer()
 
-    # 预加载 Embedding / Reranker 模型（首次加载阻塞 60-90s，之后瞬时返回）
+    # 模型后台预加载——首次推理前自动触发 lazy init，不阻塞启动
     if settings.kb_embedding_model:
         try:
             from src.services.embedding_service import get_embedding_service
 
             emb_svc = get_embedding_service()
-            emb_svc._lazy_init()  # 同步阻塞加载，避免 executor 在 Windows 上卡死
-            logger.info("   Embedding 模型预热完成")
+            import asyncio as _asyncio
+            import concurrent.futures as _futures
+
+            _pool = _futures.ThreadPoolExecutor(max_workers=1)
+            _asyncio.ensure_future(
+                _asyncio.get_running_loop().run_in_executor(
+                    _pool, emb_svc._lazy_init
+                )
+            )
+            logger.info("   Embedding 模型后台预热已提交")
         except Exception as e:
             logger.warning(f"   Embedding 模型预热失败（知识库功能不可用）: {e}")
 
@@ -208,8 +312,16 @@ async def lifespan(app: FastAPI):
             from src.services.reranker_service import get_reranker_service
 
             rerank_svc = get_reranker_service()
-            rerank_svc._lazy_init()  # 同步阻塞加载
-            logger.info("   Reranker 模型预热完成")
+            import asyncio as _asyncio2
+            import concurrent.futures as _futures2
+
+            _pool2 = _futures2.ThreadPoolExecutor(max_workers=1)
+            _asyncio2.ensure_future(
+                _asyncio2.get_running_loop().run_in_executor(
+                    _pool2, rerank_svc._lazy_init
+                )
+            )
+            logger.info("   Reranker 模型后台预热已提交")
         except Exception as e:
             logger.warning(f"   Reranker 模型预热失败: {e}")
 
@@ -228,6 +340,11 @@ async def lifespan(app: FastAPI):
 
     # ---- 关闭 ----
     logger.info(f"[关闭] {settings.app_name} 正在关闭...")
+
+    # 给 in-flight 请求一点时间完成，避免关闭引擎时报"连接正在使用"
+    import asyncio
+
+    await asyncio.sleep(1)
 
     from src.agents.checkpointer import shutdown_checkpointer
 
@@ -290,17 +407,25 @@ def create_app() -> FastAPI:
         """兜底异常处理，避免内部错误暴露给客户端。"""
         from loguru import logger
 
+        # 跳过 ASGI 断开连接时的噪音日志
+        if isinstance(exc, RuntimeError) and "send" in str(exc).lower():
+            return
+
         logger.exception(f"未处理的异常: {exc}")
 
-        return JSONResponse(
-            status_code=500,
-            content=ErrorResponse(
-                success=False,
-                code=50000,
-                message="服务内部错误",
-                detail=str(exc) if settings.app_debug else None,
-            ).model_dump(),
-        )
+        try:
+            return JSONResponse(
+                status_code=500,
+                content=ErrorResponse(
+                    success=False,
+                    code=50000,
+                    message="服务内部错误",
+                    detail=str(exc) if settings.app_debug else None,
+                ).model_dump(),
+            )
+        except RuntimeError:
+            # 客户端连接已断开，无法发送响应
+            return None
 
     # ---- 路由注册 ----
     app.include_router(api_v1_router)

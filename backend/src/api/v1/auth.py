@@ -1,7 +1,6 @@
 """认证 API 路由。"""
 
 import pyotp
-
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession

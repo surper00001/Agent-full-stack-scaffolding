@@ -51,6 +51,8 @@ class ConversationItem(BaseModel):
     status: str
     knowledge_base_id: str | None = None
     knowledge_base_name: str | None = None
+    user_id: str | None = None
+    username: str | None = None
     created_at: datetime
     updated_at: datetime
 

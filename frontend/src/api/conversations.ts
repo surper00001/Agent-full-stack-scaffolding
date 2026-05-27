@@ -45,11 +45,12 @@ export async function deleteConversation(id: string): Promise<void> {
   await client.delete(`${PATH}/${id}`);
 }
 
-/** 获取对话消息列表 */
+/** 获取对话消息列表（分页响应） */
 export async function getMessages(
   conversationId: string,
-): Promise<ApiResponse<Message[]>> {
-  const { data } = await client.get(`${PATH}/${conversationId}/messages`);
+  params?: PaginationParams,
+): Promise<ApiResponse<PaginatedResponse<Message>>> {
+  const { data } = await client.get(`${PATH}/${conversationId}/messages`, { params });
   return data;
 }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 import httpx
@@ -10,7 +11,6 @@ from langchain_core.tools import tool
 from loguru import logger
 
 from src.core.config import get_settings
-
 
 
 def _extract_bocha_web_items(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -89,6 +89,53 @@ def web_search(query: str, count: int = 5) -> str:
 
 _KB_SEARCH_TOOL_NAME = "search_knowledge_base"
 
+# 全局并发限流：防止 Agent 多次调用 KB 搜索工具同时占满 GPU
+# 使用 threading.Semaphore（非 asyncio）因为工具调用可能跨越不同 event loop
+_kb_search_semaphore = threading.BoundedSemaphore(2)
+
+# 模块级共享 DB 引擎：避免每次 KB 搜索创建/销毁 AsyncEngine 的开销
+# 池大小 3 + overflow 3 = 最多 6 并发连接，与 Semaphore(2) 匹配
+_kb_search_engine: Any = None
+_kb_search_engine_lock = threading.Lock()
+
+
+def _get_kb_search_engine():
+    """惰性创建共享 DB 引擎（线程安全）。"""
+    global _kb_search_engine
+    if _kb_search_engine is None:
+        with _kb_search_engine_lock:
+            if _kb_search_engine is None:
+                from sqlalchemy.ext.asyncio import create_async_engine
+
+                _kb_search_engine = create_async_engine(
+                    get_settings().database_url,
+                    echo=False,
+                    pool_size=3,
+                    max_overflow=3,
+                    pool_pre_ping=True,
+                )
+    return _kb_search_engine
+
+
+async def _search_kbs(
+    kb_svc: Any,
+    kb_ids: list[str],
+    tenant_id: str,
+    query: str,
+    top_k: int = 5,
+) -> tuple[list[Any], str, list[str], bool, str]:
+    """包装 search_multiple_kbs，返回 (citations, context_text, kb_names, low_confidence, suggestion)。"""
+    from src.services.rag.context_builder import search_multiple_kbs
+
+    return await search_multiple_kbs(
+        kb_svc=kb_svc,
+        kb_ids=kb_ids,
+        tenant_id=tenant_id,
+        query=query,
+        top_k=top_k,
+        rerank=True,
+    )
+
 
 def _build_kb_search_description(kb_names: list[str]) -> str:
     """构建 KB 搜索工具的描述文本。"""
@@ -134,29 +181,49 @@ def create_kb_search_tool(
         """搜索用户的知识库。Agent 在需要查找文档资料时自动调用。"""
         import asyncio
 
-        from src.db.session import AsyncSessionLocal
+        from src.core.config import get_settings
         from src.services.knowledge_base_service import KnowledgeBaseService
 
         async def _search() -> str:
-            from src.services.rag.context_builder import search_multiple_kbs
+            from sqlalchemy import text
+            from sqlalchemy.ext.asyncio import AsyncSession
 
-            async with AsyncSessionLocal() as session:
+            from src.core.config import get_settings
+
+            engine = _get_kb_search_engine()
+            from sqlalchemy.ext.asyncio import async_sessionmaker
+
+            async with async_sessionmaker(
+                engine, class_=AsyncSession, expire_on_commit=False
+            )() as session:
+                # 确保 pgvector 扩展可用
+                try:
+                    await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+
                 kb_svc = KnowledgeBaseService(session)
-                top, context_text, _ = await search_multiple_kbs(
+                top, context_text, kb_names, low_conf, suggestion = await _search_kbs(
                     kb_svc=kb_svc,
                     kb_ids=kb_ids,
                     tenant_id=tenant_id,
                     query=query,
                     top_k=min(top_k, 10),
-                    rerank=True,
                 )
 
             if not top:
+                hint = (
+                    suggestion
+                    if low_conf and suggestion
+                    else "知识库中未找到相关内容，建议使用 web_search 搜索互联网或请用户提供更多信息。"
+                )
                 return json.dumps({
                     "query": query,
                     "total_found": 0,
                     "results": [],
-                    "hint": "知识库中未找到相关内容，建议使用 web_search 搜索互联网或请用户提供更多信息。",
+                    "hint": hint,
+                    "low_confidence": low_conf,
                 }, ensure_ascii=False)
 
             results = [
@@ -184,7 +251,14 @@ def create_kb_search_tool(
                 "context_for_llm": context_text,
             }, ensure_ascii=False, indent=2)
 
-        # 在同步上下文中运行异步搜索
+        # 在同步上下文中运行异步搜索（并发限流保护 GPU）
+        acquired = _kb_search_semaphore.acquire(timeout=30)
+        if not acquired:
+            return json.dumps({
+                "query": query,
+                "error": "搜索请求过多，请稍后重试",
+                "results": [],
+            }, ensure_ascii=False)
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -202,6 +276,8 @@ def create_kb_search_tool(
                 "error": str(e),
                 "results": [],
             }, ensure_ascii=False)
+        finally:
+            _kb_search_semaphore.release()
 
     # 覆盖工具名和描述
     search_knowledge_base.name = _KB_SEARCH_TOOL_NAME

@@ -19,6 +19,7 @@ class FileStorageService:
     def __init__(self) -> None:
         settings = get_settings()
         self._base_dir = Path(settings.kb_storage_dir)
+        self._mineru_dir = self._base_dir.resolve().parent / "mineru_output"
 
     def get_kb_path(self, tenant_id: str, user_id: str, kb_id: str) -> Path:
         return self._base_dir / tenant_id / user_id / kb_id
@@ -95,11 +96,18 @@ class FileStorageService:
         return self.read_file(stored_path)
 
     def delete_kb_files(self, tenant_id: str, user_id: str, kb_id: str) -> None:
-        """删除知识库下所有文件。"""
+        """删除知识库下所有文件（源文件、缩略图、MinerU 中间产物）。"""
         kb_path = self.get_kb_path(tenant_id, user_id, kb_id)
         if kb_path.exists():
             shutil.rmtree(kb_path)
             logger.info(f"知识库文件已清理: {kb_path}")
+        self.delete_all_mineru_output()
+
+    def delete_all_mineru_output(self) -> None:
+        """清空所有 MinerU 中间产物目录。"""
+        if self._mineru_dir.exists():
+            shutil.rmtree(self._mineru_dir)
+            logger.info(f"MinerU 全部中间产物已清理: {self._mineru_dir}")
 
     def delete_document_file(self, stored_path: str) -> None:
         """删除单个文档的存档文件。"""
@@ -118,7 +126,7 @@ class FileStorageService:
         doc_id: str,
         stored_path: str,
     ) -> None:
-        """删除文档全部磁盘资源：源文件 + 缩略图/提取图目录。"""
+        """删除文档全部磁盘资源：源文件 + 缩略图/提取图目录 + MinerU 中间产物。"""
         self.delete_document_file(stored_path)
         thumb_dir = self.get_thumbnail_dir(tenant_id, user_id, kb_id, doc_id).resolve()
         base = self._base_dir.resolve()
@@ -127,6 +135,20 @@ class FileStorageService:
         if thumb_dir.exists():
             shutil.rmtree(thumb_dir)
             logger.info(f"文档缩略图目录已清理: {thumb_dir}")
+        self.delete_mineru_output(doc_id)
+
+    def delete_mineru_output(self, doc_id: str) -> None:
+        """删除指定文档的 MinerU 中间产物目录。
+
+        MinerU 输出目录命名格式为 {doc_id}_{random_suffix}，
+        通过前缀匹配定位并删除。
+        """
+        if not self._mineru_dir.exists():
+            return
+        for entry in self._mineru_dir.iterdir():
+            if entry.is_dir() and entry.name.startswith(doc_id):
+                shutil.rmtree(entry)
+                logger.info(f"MinerU 中间产物已清理: {entry}")
 
     def get_absolute_path(self, stored_path: str) -> Path:
         """获取存档文件的绝对路径（用于处理）。"""

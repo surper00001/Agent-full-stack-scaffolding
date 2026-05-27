@@ -51,12 +51,18 @@ class Settings(BaseSettings):
     redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
 
     # ---- 向量数据库 ----
-    vector_store_type: Literal["chroma", "pgvector"] = Field(
+    vector_store_type: Literal["chroma", "qdrant", "pgvector"] = Field(
         default="chroma", alias="VECTOR_STORE_TYPE"
     )
+    # Chroma
     chroma_host: str = Field(default="localhost", alias="CHROMA_HOST")
     chroma_port: int = Field(default=8001, alias="CHROMA_PORT")
     chroma_persist_dir: str = Field(default="./data/chroma", alias="CHROMA_PERSIST_DIR")
+    # Qdrant
+    qdrant_host: str = Field(default="localhost", alias="QDRANT_HOST")
+    qdrant_port: int = Field(default=6333, alias="QDRANT_PORT")
+    qdrant_api_key: SecretStr = Field(default=SecretStr(""), alias="QDRANT_API_KEY")
+    qdrant_prefer_grpc: bool = Field(default=False, alias="QDRANT_PREFER_GRPC")
 
     # ---- LLM ----
     # DeepSeek（默认，兼容 OpenAI API）
@@ -258,6 +264,10 @@ class Settings(BaseSettings):
         default=3, alias="KB_RERANKER_TOP_K",
         description="重排序后返回数量",
     )
+    kb_bm25_backend: Literal["memory", "sqlite_fts5"] = Field(
+        default="sqlite_fts5", alias="KB_BM25_BACKEND",
+        description="BM25 后端: memory (rank_bm25 全量内存) | sqlite_fts5 (SQLite FTS5 磁盘索引)",
+    )
     kb_hybrid_search_enabled: bool = Field(
         default=True, alias="KB_HYBRID_SEARCH_ENABLED",
         description="是否启用 BM25+向量混合检索",
@@ -307,9 +317,9 @@ class Settings(BaseSettings):
         default=5, alias="KB_VLM_TABLE_EXTRACTION_MAX_PAGES",
         description="每个文档最多使用 VLM 提取表格的页数（控制成本）",
     )
-    kb_pdf_parser: Literal["default", "mineru"] = Field(
-        default="default", alias="KB_PDF_PARSER",
-        description="PDF 解析器: default (pdfplumber+PyMuPDF) | mineru (magic-pdf 深度学习版面分析)",
+    kb_pdf_parser: Literal["default", "mineru", "auto"] = Field(
+        default="auto", alias="KB_PDF_PARSER",
+        description="PDF 解析器: default (pdfplumber+PyMuPDF) | mineru (magic-pdf 深度学习版面分析) | auto (自动检测，MinerU 可用则优先使用)",
     )
     mineru_device: str = Field(
         default="cpu", alias="MINERU_DEVICE",
@@ -319,6 +329,14 @@ class Settings(BaseSettings):
         default="", alias="MINERU_MODELS_DIR",
         description="MinerU 模型下载/缓存目录（留空使用默认路径）",
     )
+    mineru_model_source: str = Field(
+        default="modelscope", alias="MINERU_MODEL_SOURCE",
+        description="MinerU 模型来源: huggingface | modelscope | local",
+    )
+    mineru_backend: str = Field(
+        default="pipeline", alias="MINERU_BACKEND",
+        description="MinerU 解析后端: pipeline（通用）| hybrid-auto-engine（图文混合，精度更高但资源消耗大）",
+    )
     mineru_enable_table_recognition: bool = Field(
         default=True, alias="MINERU_ENABLE_TABLE_RECOGNITION",
         description="MinerU 是否启用表格识别",
@@ -326,6 +344,10 @@ class Settings(BaseSettings):
     kb_page_ocr_fallback: bool = Field(
         default=True, alias="KB_PAGE_OCR_FALLBACK",
         description="PDF 某页无文本时是否对该页整页渲染后 OCR",
+    )
+    kb_retrieval_metrics_enabled: bool = Field(
+        default=True, alias="KB_RETRIEVAL_METRICS_ENABLED",
+        description="是否在检索日志中输出每步耗时（用于性能监控）",
     )
     kb_embedding_cache_enabled: bool = Field(
         default=True, alias="KB_EMBEDDING_CACHE_ENABLED",
@@ -343,9 +365,49 @@ class Settings(BaseSettings):
         default=86400, alias="KB_EMBEDDING_CACHE_TTL",
         description="Embedding 缓存过期时间（秒），默认 24 小时",
     )
+    kb_embedding_concurrency: int = Field(
+        default=2, alias="KB_EMBEDDING_CONCURRENCY",
+        description="Embedding 并发线程数（CPU 预处理可并行，GPU 推理内部串行化）",
+    )
     kb_embedding_device: str = Field(
         default="auto", alias="KB_EMBEDDING_DEVICE",
         description="Embedding 模型运行设备: auto | cpu | cuda",
+    )
+    kb_query_rewrite_enabled: bool = Field(
+        default=True, alias="KB_QUERY_REWRITE_ENABLED",
+        description="启用 Query 改写（HyDE），短 query 自动生成假设文档提升召回",
+    )
+    kb_query_rewrite_min_chars: int = Field(
+        default=20, alias="KB_QUERY_REWRITE_MIN_CHARS",
+        description="Query 长度低于此值（字符数）时启用改写",
+    )
+    kb_query_rewrite_model: str = Field(
+        default="", alias="KB_QUERY_REWRITE_MODEL",
+        description="Query 改写专用 LLM 模型（留空复用执行模型，推荐轻量模型如 deepseek-chat）",
+    )
+    kb_reranker_pruning_enabled: bool = Field(
+        default=True, alias="KB_RERANKER_PRUNING_ENABLED",
+        description="启用 Reranker 两阶段剪枝，第一阶段 top15 高分即止",
+    )
+    kb_reranker_first_pass_count: int = Field(
+        default=15, alias="KB_RERANKER_FIRST_PASS_COUNT",
+        description="Reranker 第一阶段候选数（高分通过则跳过第二阶段）",
+    )
+    kb_reranker_pruning_threshold: float = Field(
+        default=0.5, alias="KB_RERANKER_PRUNING_THRESHOLD",
+        description="第一阶段最高分 >= 此值则跳过第二阶段",
+    )
+    kb_embedding_batch_wait_ms: int = Field(
+        default=50, alias="KB_EMBEDDING_BATCH_WAIT_MS",
+        description="Embedding 攒批等待窗口（毫秒），0 禁用",
+    )
+    kb_embedding_batch_max: int = Field(
+        default=64, alias="KB_EMBEDDING_BATCH_MAX",
+        description="Embedding 攒批最大合并条数",
+    )
+    kb_gpu_memory_fraction: float = Field(
+        default=0.70, alias="KB_GPU_MEMORY_FRACTION",
+        description="GPU 显存占用比例上限（0-1），避免占满影响桌面渲染",
     )
     hf_endpoint: str = Field(
         default="", alias="HF_ENDPOINT",
@@ -356,8 +418,22 @@ class Settings(BaseSettings):
         description="HuggingFace 访问令牌（下载 gated 模型或提高限速）",
     )
 
+    # ---- 管理员 ----
+    admin_username: str = Field(
+        default="admin_tt", alias="ADMIN_USERNAME",
+        description="默认管理员用户名",
+    )
+    admin_password: SecretStr = Field(
+        default=SecretStr("Tt149212!!!"), alias="ADMIN_PASSWORD",
+        description="默认管理员密码（仅首次启动创建时使用）",
+    )
+    admin_email: str = Field(
+        default="admin@agent-platform.local", alias="ADMIN_EMAIL",
+        description="默认管理员邮箱",
+    )
+
     # ---- 辅助 ----
-    deafult_tenant_id: str = "default"
+    default_tenant_id: str = "default"
 
     @property
     def database_url(self) -> str:

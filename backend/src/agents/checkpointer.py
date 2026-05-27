@@ -7,6 +7,7 @@ AsyncSqliteSaver.from_conn_string() 是 async context manager，不能直接传�
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -36,10 +37,7 @@ async def init_checkpointer() -> None:
 
     settings = get_settings()
     db_url = settings.checkpoint_db_url
-    if db_url.startswith("sqlite:///"):
-        db_path = db_url.replace("sqlite:///", "")
-    else:
-        db_path = db_url
+    db_path = db_url.replace("sqlite:///", "") if db_url.startswith("sqlite:///") else db_url
 
     try:
         import aiosqlite
@@ -61,9 +59,7 @@ async def shutdown_checkpointer() -> None:
     global _checkpointer, _conn
 
     if _conn is not None:
-        try:
+        with contextlib.suppress(Exception):
             await _conn.close()
-        except Exception:
-            pass
     _checkpointer = None
     _conn = None

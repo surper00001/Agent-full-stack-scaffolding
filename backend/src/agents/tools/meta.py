@@ -7,8 +7,6 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-
-
 # 全局工具注册表，在模块加载时填充
 _tool_registry: dict[str, dict[str, Any]] = {}
 
@@ -29,8 +27,11 @@ def _categorize_tool(name: str) -> str:
         "web_search": "L1-信息", "analyze_trending_topics": "L1-信息",
         "generate_video_script": "L2-创作", "generate_storyboard": "L2-创作",
         "generate_shot_list": "L2-创作",
+        "generate_mindmap": "L2-创作", "edit_mindmap": "L2-创作",
+        "fetch_url_outline": "L1-信息",
         "save_markdown_file": "L3-输出", "save_text_file": "L3-输出",
         "save_srt_subtitle": "L3-输出",
+        "export_mindmap": "L3-输出",
         "tool_search": "Meta",
     }
     return cats.get(name, "Unknown")

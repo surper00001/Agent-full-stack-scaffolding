@@ -114,6 +114,17 @@ class ConversationService:
             tenant_id=tenant_id, skip=skip, limit=limit, **filters
         )
 
+    async def count_conversations(
+        self,
+        tenant_id: str,
+        user_id: str | None = None,
+    ) -> int:
+        """统计会话总数（按租户和可选用户过滤）。"""
+        filters: dict[str, Any] = {}
+        if user_id is not None:
+            filters["user_id"] = user_id
+        return await self._conv_repo.count(tenant_id=tenant_id, **filters)
+
     async def delete_conversation(
         self, conv_id: str, tenant_id: str, user_id: str | None = None
     ) -> bool:
@@ -194,6 +205,16 @@ class ConversationService:
             conversation_id=conversation_id,
             skip=skip,
             limit=limit,
+        )
+
+    async def count_messages(
+        self,
+        conversation_id: str,
+        tenant_id: str,
+    ) -> int:
+        """统计会话的消息总数。"""
+        return await self._msg_repo.count(
+            tenant_id=tenant_id, conversation_id=conversation_id
         )
 
     async def get_messages_cursor(

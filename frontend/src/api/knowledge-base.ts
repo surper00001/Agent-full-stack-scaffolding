@@ -110,6 +110,22 @@ export async function deleteDocument(kbId: string, docId: string): Promise<void>
   await client.delete(`${PATH}/${kbId}/documents/${docId}`);
 }
 
+export async function cancelDocument(
+  kbId: string,
+  docId: string,
+): Promise<ApiResponse<{ cancelled: boolean }>> {
+  const { data } = await client.post(`${PATH}/${kbId}/documents/${docId}/cancel`);
+  return data;
+}
+
+export async function retryDocument(
+  kbId: string,
+  docId: string,
+): Promise<ApiResponse<{ document_id: string }>> {
+  const { data } = await client.post(`${PATH}/${kbId}/documents/${docId}/retry`);
+  return data;
+}
+
 export async function reprocessDocument(
   kbId: string,
   docId: string,
@@ -135,8 +151,20 @@ export async function searchKB(
 export async function viewDocument(
   kbId: string,
   docId: string,
+  page?: number,
 ): Promise<ApiResponse<KBDocumentView>> {
-  const { data } = await client.get(`${PATH}/${kbId}/documents/${docId}/view`);
+  const { data } = await client.get(`${PATH}/${kbId}/documents/${docId}/view`, {
+    params: page != null ? { page } : undefined,
+  });
+  return data;
+}
+
+/** 获取文档页面元数据（轻量，仅用于页码导航） */
+export async function viewDocumentPages(
+  kbId: string,
+  docId: string,
+): Promise<ApiResponse<{ document_id: string; filename: string; file_type: string; total_pages: number; pages: { page_number: number; has_content: boolean }[]; doc_category?: string; doc_category_label?: string }>> {
+  const { data } = await client.get(`${PATH}/${kbId}/documents/${docId}/pages`);
   return data;
 }
 

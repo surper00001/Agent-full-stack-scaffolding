@@ -13,6 +13,7 @@ import type { CreateAgentRequest } from "@/types";
 
 const AGENT_TYPES = [
   { value: "creative", label: "创意导演·五人顾问团" },
+  { value: "mindmap", label: "思维导图助手" },
   { value: "default", label: "通用助手" },
 ];
 

@@ -7,6 +7,7 @@ from src.api.deps import CurrentUser, require_admin
 from src.db.session import get_db_session
 from src.models.schemas.response import APIResponse
 from src.models.schemas.tenant import TenantResponse, TokenUsageResponse
+from src.services.token_stats_service import TokenStatsService
 
 router = APIRouter(prefix="/tenant", tags=["租户"])
 
@@ -33,7 +34,9 @@ async def get_token_usage(
     db: AsyncSession = Depends(get_db_session),
 ):
     """获取当前租户的 Token 用量统计（仅管理员）。"""
+    service = TokenStatsService(db)
+    data = await service.get_tenant_token_usage(days)
     return APIResponse(
         message="获取成功",
-        data=TokenUsageResponse(),
+        data=TokenUsageResponse(**data),
     )

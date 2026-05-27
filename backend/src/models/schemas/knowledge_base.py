@@ -65,7 +65,7 @@ class KnowledgeBaseResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     # 索引一致性（由详情接口附加，非 ORM 字段）
-    indexed_model: str | None = Field(default=None, description="Chroma 中记录的 Embedding 模型")
+    indexed_model: str | None = Field(default=None, description="向量库中记录的 Embedding 模型")
     needs_reindex: bool = Field(default=False, description="是否需要重建索引")
     server_embedding_model: str | None = Field(
         default=None, description="服务端 .env 默认 Embedding 模型"
@@ -202,6 +202,39 @@ class KBDocumentViewResponse(BaseModel):
     file_type: str
     total_pages: int
     pages: list[KBPageContent]
+    doc_category: str | None = None
+    doc_category_label: str | None = None
+
+
+class KBDocumentPageResponse(BaseModel):
+    """单页查看响应——按需加载，避免全量传输。"""
+
+    document_id: str
+    filename: str
+    file_type: str
+    total_pages: int
+    page: KBPageContent
+    doc_category: str | None = None
+    doc_category_label: str | None = None
+
+
+class KBPageMetaItem(BaseModel):
+    """页面元数据条目——用于页码导航。"""
+
+    page_number: int
+    has_content: bool
+
+
+class KBDocumentPagesMetaResponse(BaseModel):
+    """文档页面元数据——轻量级，仅用于页码导航。"""
+
+    document_id: str
+    filename: str
+    file_type: str
+    total_pages: int
+    pages: list[KBPageMetaItem]
+    doc_category: str | None = None
+    doc_category_label: str | None = None
 
 
 class KBUploadResponse(BaseModel):

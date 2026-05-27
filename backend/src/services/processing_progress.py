@@ -22,6 +22,7 @@ class ProcessStage(str, Enum):  # noqa: UP042
     INDEXING = "indexing"        # 入库向量数据库
     READY = "ready"              # 处理完成
     ERROR = "error"              # 处理失败
+    CANCELLED = "cancelled"      # 用户取消
 
 
 STAGE_WEIGHTS: dict[ProcessStage, float] = {
@@ -44,6 +45,7 @@ STAGE_LABELS: dict[ProcessStage, str] = {
     ProcessStage.INDEXING: "正在写入向量数据库...",
     ProcessStage.READY: "处理完成",
     ProcessStage.ERROR: "处理失败",
+    ProcessStage.CANCELLED: "已取消",
 }
 
 
@@ -94,6 +96,7 @@ class ProcessingProgressTracker:
 
     def __init__(self) -> None:
         self._entries: dict[str, _TrackerEntry] = {}
+        self._cancelled: set[str] = set()  # 已取消的 doc_id 集合
         self._historical_rate: float | None = None
 
     @classmethod
@@ -171,6 +174,32 @@ class ProcessingProgressTracker:
                 entry.stage = ProcessStage.ERROR
                 entry.error_message = message
 
+    def set_cancelled(self, doc_id: str) -> None:
+        """标记文档处理为已取消。"""
+        with self._lock:
+            self._cancelled.add(doc_id)
+            entry = self._entries.get(doc_id)
+            if entry:
+                entry.stage = ProcessStage.CANCELLED
+
+    def cancel(self, doc_id: str) -> bool:
+        """发出取消信号，返回是否成功标记（False 表示任务已完成无法取消）。"""
+        with self._lock:
+            entry = self._entries.get(doc_id)
+            if entry and entry.stage in (
+                ProcessStage.READY, ProcessStage.ERROR, ProcessStage.CANCELLED,
+            ):
+                return False  # 已完成/已失败/已取消，不可再取消
+            self._cancelled.add(doc_id)
+            if entry:
+                entry.stage = ProcessStage.CANCELLED
+            return True
+
+    def is_cancelled(self, doc_id: str) -> bool:
+        """检查文档处理是否已被取消。"""
+        with self._lock:
+            return doc_id in self._cancelled
+
     def set_ready(self, doc_id: str) -> None:
         with self._lock:
             entry = self._entries.get(doc_id)
@@ -213,6 +242,7 @@ class ProcessingProgressTracker:
     def cleanup(self, doc_id: str) -> None:
         with self._lock:
             self._entries.pop(doc_id, None)
+            self._cancelled.discard(doc_id)
 
     # ---- internal ----
 
@@ -250,7 +280,7 @@ class ProcessingProgressTracker:
             return f"正在写入向量数据库（{entry.total_chunks} 条）..."
 
         if stage == ProcessStage.READY:
-            parts = [f"处理完成"]
+            parts = ["处理完成"]
             if entry.total_pages > 0:
                 parts.append(f"{entry.total_pages} 页")
             if entry.text_blocks > 0:
@@ -265,6 +295,9 @@ class ProcessingProgressTracker:
 
         if stage == ProcessStage.ERROR:
             return f"处理失败: {entry.error_message or '未知错误'}"
+
+        if stage == ProcessStage.CANCELLED:
+            return "已取消"
 
         return STAGE_LABELS.get(stage, stage.value)
 
@@ -287,14 +320,14 @@ class ProcessingProgressTracker:
         if stage == ProcessStage.INDEXING:
             return 0.92
 
-        if stage in (ProcessStage.READY, ProcessStage.ERROR):
+        if stage in (ProcessStage.READY, ProcessStage.ERROR, ProcessStage.CANCELLED):
             return 1.0
 
         return STAGE_WEIGHTS.get(stage, 0.0)
 
     def _estimate_remaining(self, entry: _TrackerEntry) -> float | None:
         """预估剩余秒数。"""
-        if entry.stage in (ProcessStage.READY, ProcessStage.ERROR, ProcessStage.UPLOADED):
+        if entry.stage in (ProcessStage.READY, ProcessStage.ERROR, ProcessStage.CANCELLED, ProcessStage.UPLOADED):
             return None
 
         if self._historical_rate:

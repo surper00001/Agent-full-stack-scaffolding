@@ -37,10 +37,12 @@ class LayoutTag(str, Enum):
     FOOTER = "footer"          # 页脚（页码等）
     FOOTNOTE = "footnote"      # 脚注
     REFERENCE = "reference"    # 参考文献条目
+    FORMULA = "formula"        # 行间/行内公式
     LIST_ITEM = "list_item"    # 列表项
     TABLE_BODY = "table_body"  # 表格内容（与 block_type 正交）
     IMAGE_REGION = "image"     # 图片区域
     CODE = "code"              # 代码块
+    TEMPLATE_NOISE = "template_noise"  # 跨页重复的模板噪声（水印、重复警告语等）
 
 
 # ── 字体描述 ──────────────────────────────────────────────
@@ -118,6 +120,73 @@ class Region:
         return "body_zone"
 
 
+# ── 页眉/页脚内容白名单 ────────────────────────────────────
+
+# 已知的页眉/页脚噪声模式（全文档重复出现）
+_HEADER_FOOTER_NOISE_RE = re.compile(
+    r"^\s*(\d{1,4}\s*$"  # 纯页码
+    r"|第\s*\d+\s*页\s*$"  # 第X页
+    r"|Page\s+\d+\s*(of\s+\d+)?\s*$"  # Page X of Y
+    r"|^\s*[©®™]\s*(19|20)\d{2}\s*"  # 版权信息
+    r"|^\s*https?://"  # URL 脚注
+    r"|^\s*Confidential\s*$"  # 保密标记
+    r"|^\s*DRAFT\s*$"
+    r"|^\s*[Vv]ersion\s*[\d.]+\s*$"  # 版本号
+    r")",
+    re.IGNORECASE,
+)
+
+# 已知的内容标题模式（即使位于页眉/页脚区域也不应去除）
+_CONTENT_TITLE_WHITELIST = re.compile(
+    r"^(#{1,6}\s+|"  # Markdown 标题
+    r"第[一二三四五六七八九十百千\d]+[章节篇部条款]"  # 中文数字章节
+    r"|\d+(?:\.\d+)*\s+[A-Z一-鿿]"  # 编号标题
+    r"|(?:Abstract|Introduction|Method|Experiment|Result|Conclusion|Reference|Discussion|"
+    r"Acknowledgment|Appendix|Summary|Background|Related\s+Work)\s*$"
+    r"|[（(][一二三四五六七八九十\d]+[）)]"  # (一) 格式
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_likely_noise_in_header_footer(text: str, page_num: int) -> bool:
+    """判断页眉/页脚区域内的文本是否为噪声（可安全去除）。
+
+    白名单保护：
+    - 章节/标题模式的内容 → 保留（返回 False）
+    - 长句(>40字符) → 保留（返回 False）
+    - 匹配已知噪声模式 → 去除（返回 True）
+
+    用于在 filter_noise_blocks 之前做二次验证，避免误删正文标题。
+    """
+    stripped = text.strip()
+    if not stripped:
+        return True  # 空文本视为噪声
+
+    # 白名单：看起来像标题 → 保留
+    if _CONTENT_TITLE_WHITELIST.match(stripped):
+        return False
+
+    # 白名单：长句子（>40 字符）→ 很可能是正文，保留
+    if len(stripped) > 40:
+        return False
+
+    # 白名单：包含中文句末标点 → 完整句子，保留
+    if re.search(r"[。！？；]", stripped) and len(stripped) > 10:
+        return False
+
+    # 白名单：页码但有多余内容（如 "42 / 结论"）→ 保留
+    if re.match(r"^\d{1,4}\s*/\s*\S{2,}", stripped):
+        return False
+
+    # 噪声模式：纯页码 / 页眉标题等
+    if _HEADER_FOOTER_NOISE_RE.match(stripped):
+        return True
+
+    # 保守策略：短文本（≤20 字符）在页眉/页脚区域 → 噪声
+    return bool(len(stripped) <= 20 and page_num > 1)
+
+
 # ── 语义标签分配 ──────────────────────────────────────────
 
 
@@ -128,12 +197,34 @@ class BlockTagger:
     1. 字体层级（字号/粗细）→ 标题 vs 正文
     2. 页面位置 → 页眉/页脚/侧栏
     3. 文本内容模式 → 参考文献/列表/摘要/关键词
+
+    Reference detection handles:
+      - English: [1] Smith, J., ...  or  Smith, J. (2020) ...
+      - Chinese: [1] 张三，李四. ...  or  张三, 李四. 标题[J]. ...
+      - DOI links, ibid/et al/等人 markers
+      - Small-font text in late pages (typical of paper references)
     """
 
-    _REFERENCE_PATTERN = re.compile(
-        r"^\[\d+\]|^\d+\.\s*\[|^(?:[A-Z][a-z]+,\s+[A-Z]\.)|"
-        r"^[A-Z][a-z]+(?:\s+[A-Z]\.)+|"
-        r"DOI[：:]\s*10\.|^(?:ibid|et al|等人)",
+    # 参考文献条目开头模式
+    _REF_ENTRY_START = re.compile(
+        r"^\[\d+\]|"                         # [1], [12]
+        r"^\d+\.\s*\[|"                      # 1. [
+        r"^(?:[A-Z][a-zà-ü]+,\s+[A-Z]\.)|"   # Smith, J.
+        r"^[A-Z][a-zà-ü]+(?:\s+[A-Z]\.)+|"   # Smith J. A.
+        r"^[A-Z][A-Za-z\s\-]+\(?\d{4}[\)a-z]|"  # Smith (2020) or Smith 2020
+        r"DOI[：:]\s*10\.|"                   # DOI: 10.xxx
+        r"^(?:ibid|et al\.?|等人|同前|同上)",   # continuation markers
+    )
+    # 中文参考文献模式（方括号编号 + 中文人名）
+    _REF_CHINESE_ENTRY = re.compile(
+        r"^\[\d+\]\s*[一-鿿]|"       # [1] 张三...
+        r"^\d+[\.\、\)）]\s*[一-鿿]",  # 1. 张三...
+    )
+    # 参考文献章节标题
+    _REF_HEADING = re.compile(
+        r"^(?:参考文献|References?|Bibliography|参考书目|引用文献|"
+        r"Works\s+Cited|Reference\s+List)\s*$",
+        re.IGNORECASE,
     )
     _KEYWORD_PATTERN = re.compile(
         r"^(?:关键词|关键字|Keywords?)[：:\s]",
@@ -162,31 +253,55 @@ class BlockTagger:
         page_width: float,
         page_height: float,
         bbox: tuple[float, float, float, float] | None,
+        *,
+        body_font_size: float | None = None,
+        page_num: int = 0,
+        total_pages: int = 0,
     ) -> LayoutTag:
-        """为一个文本块分配语义标签。"""
+        """为一个文本块分配语义标签。
+
+        Args:
+            body_font_size: 文档正文字号（用于识别小字参考文献）
+            page_num: 当前页码
+            total_pages: 文档总页数（用于判断是否为文末参考文献区域）
+        """
         if not text.strip():
             return LayoutTag.BODY
 
         stripped = text.strip()
         text_len = len(stripped)
 
-        # 先按位置归区
+        # 先按位置归区（带内容白名单保护，避免误删正文标题）
         if bbox:
             zone = Region.classify(page_width, page_height, bbox)
             if zone == "header_zone":
-                return LayoutTag.HEADER
-            if zone == "footer_zone":
-                return LayoutTag.FOOTER
+                if not is_likely_noise_in_header_footer(stripped, page_num):
+                    pass  # 白名单内容：可能是章节标题，不标记为页眉
+                else:
+                    return LayoutTag.HEADER
+            elif zone == "footer_zone":
+                if not is_likely_noise_in_header_footer(stripped, page_num):
+                    pass  # 白名单内容
+                else:
+                    return LayoutTag.FOOTER
+
+        # 参考文献章节标题（如 "参考文献"、"References"）
+        if cls._REF_HEADING.match(stripped) and text_len < 60:
+            return LayoutTag.HEADING
 
         # 按内容模式
         if cls._KEYWORD_PATTERN.match(stripped):
             return LayoutTag.KEYWORDS
         if cls._ABSTRACT_PATTERN.match(stripped):
             return LayoutTag.ABSTRACT
-        if cls._REFERENCE_PATTERN.match(stripped) and text_len < 500:
-            return LayoutTag.REFERENCE
         if cls._CAPTION_PATTERN.match(stripped):
             return LayoutTag.CAPTION
+
+        # 参考文献检测（多策略）
+        ref_score = cls._reference_score(stripped, text_len, font, body_font_size, page_num, total_pages)
+        if ref_score >= 2:
+            return LayoutTag.REFERENCE
+
         if cls._FOOTNOTE_PATTERN.match(stripped) and text_len < 200:
             return LayoutTag.FOOTNOTE
         if cls._LIST_PATTERN.match(stripped) and text_len < 300:
@@ -205,7 +320,122 @@ class BlockTagger:
 
         return LayoutTag.BODY
 
+    @classmethod
+    def _reference_score(
+        cls,
+        text: str,
+        text_len: int,
+        font: FontInfo | None,
+        body_font_size: float | None,
+        page_num: int,
+        total_pages: int,
+    ) -> int:
+        """综合评分判断文本块是否为参考文献条目。
 
+        返回值 >= 2 即判定为 REFERENCE。
+        """
+        score = 0
+
+        # 1. 开头匹配参考文献条目模式
+        if cls._REF_ENTRY_START.match(text) or cls._REF_CHINESE_ENTRY.match(text):
+            score += 2
+
+        # 2. 文本内多行匹配参考文献模式（块内密度）
+        if not score and text_len > 100:
+            lines = text.split("\n")
+            if len(lines) >= 3:
+                ref_line_count = sum(
+                    1 for ln in lines
+                    if cls._REF_ENTRY_START.match(ln.strip())
+                    or cls._REF_CHINESE_ENTRY.match(ln.strip())
+                    or cls._REF_HEADING.match(ln.strip())
+                )
+                if ref_line_count >= len(lines) * 0.5:
+                    score += 2
+
+        # 3. 小字号信号（论文字号通常比正文小 1-2pt）
+        if font and body_font_size and font.size < body_font_size - 0.5:
+            score += 1
+
+        # 4. 文档后半部分（参考文献通常在文末）
+        if total_pages > 3 and page_num > total_pages * 0.6:
+            score += 1
+
+        # 5. 内容中含 DOI / URL / 期刊卷期号特征
+        if re.search(r"DOI[：:\s]|doi\.org/|10\.\d{4,}/|Vol\.\s*\d+|pp\.\s*\d+|"
+                     r"[Jj]ournal\s+of|[Jj]\.[\s\d]|（[A-Za-z]+）|"
+                     r"硕士学位论文|博士学位论文|arXiv|PMID",
+                     text):
+            score += 1
+
+        return score
+
+
+# ── 列表结构分析 ──────────────────────────────────────────
+
+# 列表前缀模式
+_ORDERED_LIST_RE = re.compile(
+    r"^[\s]*([\d]+|[a-zA-Z]|[ivxlcdm]+|[一二三四五六七八九十]+)[\.\、\)）]\s+"
+)
+_UNORDERED_LIST_RE = re.compile(
+    r"^[\s]*[-•·▪▸►➤✓✅❖■◆●○►*]\s+"
+)
+
+# 默认段落缩进宽度（pt）
+_DEFAULT_INDENT_WIDTH = 24.0
+
+
+def enrich_list_structure(
+    blocks: list,
+) -> list:
+    """为连续的 LIST_ITEM 块补充嵌套层级和列表类型信息。
+
+    - 通过缩进检测嵌套层级（每级缩进 ~24pt）
+    - 通过前缀区分有序/无序列表
+    - 原地修改并返回 blocks
+    """
+    if not blocks:
+        return blocks
+
+    i = 0
+    while i < len(blocks):
+        block = blocks[i]
+        if block.layout_tag != LayoutTag.LIST_ITEM.value:
+            i += 1
+            continue
+
+        # 收集连续的列表项
+        list_group: list[tuple[int, object]] = []
+        j = i
+        while j < len(blocks) and blocks[j].layout_tag == LayoutTag.LIST_ITEM.value:
+            list_group.append((j, blocks[j]))
+            j += 1
+
+        if not list_group:
+            i += 1
+            continue
+
+        # 计算基线缩进（第一个列表项或最小缩进）
+        x0_values = [
+            b.bbox[0] if b.bbox else 0.0
+            for _, b in list_group
+        ]
+        base_x0 = min(x0_values) if x0_values else 0.0
+
+        for _idx, b in list_group:
+            bbox_x0 = b.bbox[0] if b.bbox else base_x0
+            # 缩进层级 = (当前缩进 - 基线) / 24pt，向上取整
+            indent = max(0.0, bbox_x0 - base_x0)
+            level = round(indent / _DEFAULT_INDENT_WIDTH)
+            level = max(0, min(level, 4))  # 最多 4 级嵌套
+
+            stripped = b.content.strip()
+            b.list_type = "ordered" if _ORDERED_LIST_RE.match(stripped) else "unordered"
+            b.list_level = level
+
+        i = j  # 跳过已处理的组
+
+    return blocks
 # ── 字号分析 ──────────────────────────────────────────────
 
 

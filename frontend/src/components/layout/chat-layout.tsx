@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Outlet, useNavigate, useLocation, Link } from "react-router-dom";
+import { Outlet, useNavigate, useLocation, Link, Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks";
 import { useAuthStore, useUIStore } from "@/stores";
 import { useConversations } from "@/hooks";
@@ -30,7 +30,7 @@ import {
  */
 export function ChatLayout() {
   const { isLoading, isAuthenticated } = useAuth(true);
-  const { user, logout } = useAuthStore();
+  const { user, isAdmin, logout } = useAuthStore();
   const { sidebarOpen, toggleSidebar, theme, setTheme, colorTheme, setColorTheme } = useUIStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -44,6 +44,9 @@ export function ChatLayout() {
   }
 
   if (!isAuthenticated) return null;
+
+  // 管理员禁止进入聊天界面，重定向到管理后台
+  if (isAdmin) return <Navigate to="/admin" replace />;
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">

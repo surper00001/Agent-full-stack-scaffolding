@@ -1,3 +1,5 @@
+@import "./styles/mindmap.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -274,27 +276,118 @@
 }
 
 /* ===== 知识库表格样式 ===== */
+.kb-table-wrapper {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-width: 100%;
+  max-height: 65vh;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
+  /* 水平滚动阴影提示 */
+  background:
+    linear-gradient(to right, hsl(var(--background)) 30%, transparent),
+    linear-gradient(to right, transparent, hsl(var(--background)) 70%) right center,
+    linear-gradient(to right, rgba(0,0,0,0.06), transparent),
+    linear-gradient(to right, transparent, rgba(0,0,0,0.06)) right center;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+.dark .kb-table-wrapper {
+  background:
+    linear-gradient(to right, hsl(var(--background)) 30%, transparent),
+    linear-gradient(to right, transparent, hsl(var(--background)) 70%) right center,
+    linear-gradient(to right, rgba(255,255,255,0.04), transparent),
+    linear-gradient(to right, transparent, rgba(255,255,255,0.04)) right center;
+  background-repeat: no-repeat;
+  background-size: 40px 100%, 40px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
 .kb-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   line-height: 1.5;
 }
-.kb-table th,
-.kb-table td {
+
+.kb-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.kb-table th {
   padding: 0.5rem 0.75rem;
+  border: 1px solid hsl(var(--border));
+  text-align: left;
+  vertical-align: middle;
+  background: hsl(var(--muted) / 0.65);
+  font-weight: 600;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  backdrop-filter: blur(4px);
+}
+
+.kb-table td {
+  padding: 0.35rem 0.65rem;
   border: 1px solid hsl(var(--border));
   text-align: left;
   vertical-align: top;
 }
-.kb-table th {
-  background: hsl(var(--muted) / 0.5);
-  font-weight: 600;
-  white-space: nowrap;
+
+/* 合并单元格视觉区分 */
+.kb-table td[colspan]:not([colspan="1"]),
+.kb-table th[colspan]:not([colspan="1"]) {
+  text-align: center;
+  vertical-align: middle;
+  font-weight: 500;
+  background: hsl(var(--muted) / 0.25);
 }
-.kb-table tr:hover td {
-  background: hsl(var(--muted) / 0.2);
+
+.kb-table td[rowspan]:not([rowspan="1"]) {
+  vertical-align: middle;
+  background: hsl(var(--muted) / 0.12);
 }
+
+/* 斑马纹 */
+.kb-table tbody tr:nth-child(even) td {
+  background: hsl(var(--muted) / 0.06);
+}
+
+.kb-table tbody tr:hover td {
+  background: hsl(var(--muted) / 0.18);
+}
+
+/* 表格行数信息条 */
+.kb-table-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 8px;
+  font-size: 0.6875rem;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 0.3);
+  border-bottom: 1px solid hsl(var(--border));
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.kb-table-info + .kb-table-wrapper {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* 响应式 */
+@media (max-width: 640px) {
+  .kb-table {
+    font-size: 0.6875rem;
+  }
+  .kb-table th,
+  .kb-table td {
+    padding: 0.25rem 0.4rem;
+  }
+}
+
 /* 搜索高亮 */
 .kb-highlight {
   background: #fef08a;
@@ -305,12 +398,4 @@
 .dark .kb-highlight {
   background: #854d0e;
   color: #fef9c3;
-}
-/* Table in card - ensure overflow */
-.kb-table-wrapper {
-  overflow-x: auto;
-  max-width: 100%;
-  scrollbar-gutter: stable;
-  border-radius: var(--radius);
-  border: 1px solid hsl(var(--border));
 }

@@ -17,6 +17,8 @@ const CHUNK_TYPE_LABEL: Record<string, string> = {
   image: "图片",
   code: "代码",
   text: "文本",
+  reference: "参考文献",
+  formula: "公式",
 };
 
 export function SearchResultCard({ item, kbId, expanded, onToggleExpand }: SearchResultCardProps) {
@@ -70,11 +72,15 @@ export function SearchResultCard({ item, kbId, expanded, onToggleExpand }: Searc
             content: item.content,
             table_html: item.metadata_?.table_html,
             image_url: item.metadata_?.image_url,
+            is_table_image: item.metadata_?.is_table_image ?? null,
+            table_caption: item.metadata_?.table_caption ?? null,
             ocr_status: item.metadata_?.ocr_status as KBBlockData["ocr_status"],
             ocr_error: item.metadata_?.ocr_error,
             image_caption: item.metadata_?.image_caption,
             image_description: item.metadata_?.image_description,
             section_title: item.metadata_?.section_title,
+            image_width: item.metadata_?.image_width ?? null,
+            image_height: item.metadata_?.image_height ?? null,
           }}
           kbId={kbId}
           docId={item.document_id}

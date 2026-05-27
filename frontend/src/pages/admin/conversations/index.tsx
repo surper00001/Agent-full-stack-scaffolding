@@ -38,6 +38,7 @@ export default function AdminConversationsPage() {
                   <div>
                     <CardTitle className="text-base">{conv.title || "未命名对话"}</CardTitle>
                     <p className="text-sm text-muted-foreground">
+                      {conv.username && <span className="mr-2 font-medium">{conv.username}</span>}
                       {conv.message_count} 条消息 · {new Date(conv.created_at).toLocaleString("zh-CN")}
                     </p>
                   </div>

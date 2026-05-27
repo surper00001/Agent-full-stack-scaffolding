@@ -23,6 +23,7 @@ from src.agents.base import BaseAgent
 from src.agents.prompts import get_prompt_for_agent
 from src.api.deps import CurrentUser, get_current_tenant, get_current_user
 from src.core.config import get_settings
+from src.core.exceptions import ForbiddenError
 from src.db.session import get_db_session
 from src.llm.factory import get_llm_factory
 from src.models.schemas.request import (
@@ -47,12 +48,18 @@ def _resolve_user_id(current_user: CurrentUser) -> str | None:
     return None if current_user.role == "admin" else current_user.id
 
 
+def _require_non_admin(current_user: CurrentUser) -> None:
+    """管理员禁止调用聊天相关接口，仅普通用户可使用。"""
+    if current_user.role == "admin":
+        raise ForbiddenError("管理员不可进行对话操作，请使用管理后台")
+
+
 async def _to_conversation_item(
     conv: Any,
     db: AsyncSession,
     tenant_id: str,
 ) -> ConversationItem:
-    """将会话 ORM 转为响应项，附带知识库名称。"""
+    """将会话 ORM 转为响应项，附带知识库名称和用户信息。"""
     kb_name: str | None = None
     if conv.knowledge_base_id:
         try:
@@ -63,6 +70,20 @@ async def _to_conversation_item(
             kb_name = kb.name
         except Exception:
             kb_name = None
+
+    # 查询用户名
+    username: str | None = None
+    if conv.user_id:
+        try:
+            from src.db.repository import BaseRepository
+            from src.models.domain.user import User
+
+            user_repo = BaseRepository[User](User, db)
+            user = await user_repo.get_by_id(conv.user_id)
+            username = user.username if user else None
+        except Exception:
+            username = None
+
     return ConversationItem(
         id=conv.id,
         title=conv.title,
@@ -71,6 +92,8 @@ async def _to_conversation_item(
         status=conv.status,
         knowledge_base_id=conv.knowledge_base_id,
         knowledge_base_name=kb_name,
+        user_id=conv.user_id,
+        username=username,
         created_at=conv.created_at,
         updated_at=conv.updated_at,
     )
@@ -85,6 +108,7 @@ async def create_conversation(
     current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[ConversationItem]:
+    _require_non_admin(current_user)
     service = ConversationService(db)
     conv = await service.create_conversation(
         title=body.title,
@@ -114,14 +138,17 @@ async def list_conversations(
         limit=pagination.page_size,
         user_id=_resolve_user_id(current_user),
     )
-    total = len(convs)
+    total = await service.count_conversations(
+        tenant_id=tenant_id,
+        user_id=_resolve_user_id(current_user),
+    )
     return APIResponse(
         data=PaginatedData(
             items=[await _to_conversation_item(c, db, tenant_id) for c in convs],
             total=total,
             page=pagination.page,
             page_size=pagination.page_size,
-            pages=(total // pagination.page_size) + 1,
+            pages=max(1, (total + pagination.page_size - 1) // pagination.page_size) if total > 0 else 0,
         )
     )
 
@@ -179,14 +206,17 @@ async def get_messages(
         skip=skip,
         limit=pagination.page_size,
     )
-    total = len(msgs)
+    total = await service.count_messages(
+        conversation_id=conversation_id,
+        tenant_id=tenant_id,
+    )
     return APIResponse(
         data=PaginatedData(
             items=[MessageItem.model_validate(m) for m in msgs],
             total=total,
             page=pagination.page,
             page_size=pagination.page_size,
-            pages=(total // pagination.page_size) + 1 if pagination.page_size else 0,
+            pages=max(1, (total + pagination.page_size - 1) // pagination.page_size) if total > 0 else 0,
         )
     )
 
@@ -346,6 +376,7 @@ async def send_message(
     - rag_context: 预检索引用（citations）
     - done: 完成信号（含 token_usage 和 context_usage）
     """
+    _require_non_admin(current_user)
     service = ConversationService(db)
     llm_factory = get_llm_factory()
 
@@ -492,6 +523,13 @@ async def send_message(
                                                 "score": c.score,
                                                 "chunk_type": c.chunk_type,
                                                 "section_title": c.section_title,
+                                                "table_html": c.table_html,
+                                                "table_caption": c.table_caption,
+                                                "image_url": c.image_url,
+                                                "image_description": c.image_description,
+                                                "image_caption": c.image_caption,
+                                                "image_width": c.image_width,
+                                                "image_height": c.image_height,
                                             })
                             matched = False
                             for tc in tool_calls_in_flight:
@@ -524,11 +562,14 @@ async def send_message(
                 if full_response:
                     msg_meta: dict[str, Any] = {}
                     if all_citations:
-                        msg_meta = {
+                        msg_meta.update({
                             "citations": all_citations,
                             "rag_mode": "hybrid" if len(all_citations) > len(proactive_citations) else "proactive",
                             "kb_id": resolved_kb_id,
-                        }
+                        })
+                    mindmap = _extract_mindmap_meta(full_response)
+                    if mindmap:
+                        msg_meta["mindmap"] = mindmap
                     await service.add_message_with_metadata(
                         conversation_id=conversation_id,
                         role="assistant",
@@ -597,11 +638,14 @@ async def send_message(
     if ai_response:
         msg_meta: dict[str, Any] = {}
         if proactive_citations:
-            msg_meta = {
+            msg_meta.update({
                 "citations": proactive_citations,
                 "rag_mode": "proactive",
                 "kb_id": resolved_kb_id,
-            }
+            })
+        mindmap = _extract_mindmap_meta(ai_response)
+        if mindmap:
+            msg_meta["mindmap"] = mindmap
         await service.add_message_with_metadata(
             conversation_id=conversation_id,
             role="assistant",
@@ -649,6 +693,26 @@ def _executor_messages_from_event(event: dict[str, Any]) -> list[Any]:
     return []
 
 
+def _extract_mindmap_meta(content: str) -> dict[str, Any] | None:
+    """从 AI 响应文本中提取思维导图 JSON，供存入 metadata 复用。
+
+    匹配模式：```json ... ``` 块中包含 root.title / root.text / root.children。
+    """
+    import re as _re
+
+    # 查找 json 代码块
+    for match in _re.finditer(r"```json\s*\n(.*?)\n```", content, _re.DOTALL):
+        try:
+            obj = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and "root" in obj:
+            root = obj.get("root", {})
+            if isinstance(root, dict) and "text" in root and "children" in root:
+                return obj  # 返回完整 dict — 存入 metadata 后前端 extractMindmapFromMetadata 可复用
+    return None
+
+
 def _extract_file_info(text: str) -> dict[str, Any] | None:
     """从文本中提取文件下载链接信息。"""
     import re
@@ -683,6 +747,7 @@ async def upload_chat_image(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> dict[str, Any]:
     """上传图片到对话中，返回 image_id 供 send 接口使用。"""
+    _require_non_admin(current_user)
     if not file.filename:
         return {"success": False, "code": 40001, "message": "文件名不能为空"}
 
@@ -782,3 +847,26 @@ async def _resolve_image_descriptions(
     if parts:
         return "\n\n".join(parts)
     return ""
+
+
+# ---- 思维导图导出 ----
+
+@router.post("/export-mindmap", summary="导出思维导图文件", tags=["会话管理"])
+async def export_mindmap_endpoint(
+    body: dict[str, Any],
+    current_user: CurrentUser = Depends(get_current_user),
+) -> dict[str, Any]:
+    """将思维导图 JSON 导出为指定格式文件，返回下载 URL。
+
+    请求体: {"mindmap_json": {...}, "format": "opml|mm|markdown|json"}
+    """
+    from src.agents.tools.mindmap import export_mindmap as _export
+
+    mindmap_data = body.get("mindmap_json", {})
+    fmt = body.get("format", "opml")
+
+    result_json = _export.invoke({
+        "mindmap_json": json.dumps(mindmap_data, ensure_ascii=False),
+        "format": fmt,
+    })
+    return json.loads(result_json)

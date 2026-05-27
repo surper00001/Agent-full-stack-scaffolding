@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchDocumentDownloadBlob, fetchDocumentImageBlob } from "@/api/knowledge-base";
 import { cn } from "@/lib/utils";
-import { ImageOff } from "lucide-react";
+import { ImageOff, X, ZoomIn } from "lucide-react";
 
 interface AuthenticatedImageProps {
   kbId: string;
   docId: string;
-  /** 后端返回的相对 URL，如 /api/v1/knowledge-bases/.../images/xxx.png */
   imageUrl?: string | null;
   alt?: string;
   className?: string;
+  /** 图片原始宽度（像素），用于等比例渲染 */
+  imageWidth?: number | null;
+  /** 图片原始高度（像素），用于等比例渲染 */
+  imageHeight?: number | null;
 }
 
 /** 解析 imageUrl，提取图片文件名或判定为 download 模式 */
@@ -30,10 +33,13 @@ export function AuthenticatedImage({
   imageUrl,
   alt = "文档图片",
   className,
+  imageWidth,
+  imageHeight,
 }: AuthenticatedImageProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [lightbox, setLightbox] = useState(false);
 
   useEffect(() => {
     if (!imageUrl) {
@@ -75,6 +81,19 @@ export function AuthenticatedImage({
     };
   }, [kbId, docId, imageUrl]);
 
+  // Escape 关闭灯箱
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightbox(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [lightbox]);
+
+  const openLightbox = useCallback(() => setLightbox(true), []);
+  const closeLightbox = useCallback(() => setLightbox(false), []);
+
   if (!imageUrl) return null;
 
   if (loading) {
@@ -104,11 +123,62 @@ export function AuthenticatedImage({
     );
   }
 
+  // 根据原始尺寸计算渲染样式
+  const hasDims = imageWidth && imageHeight && imageWidth > 0 && imageHeight > 0;
+  const aspectRatio = hasDims ? imageWidth / imageHeight : undefined;
+  const isVeryTall = hasDims && imageHeight / imageWidth > 3;
+
+  const imgStyle: React.CSSProperties = {};
+  if (aspectRatio !== undefined) {
+    imgStyle.aspectRatio = `${imageWidth} / ${imageHeight}`;
+  }
+
   return (
-    <img
-      src={blobUrl}
-      alt={alt}
-      className={cn("max-h-96 max-w-full rounded-md border bg-muted/20 object-contain", className)}
-    />
+    <>
+      <div className={cn("group relative", className)}>
+        <img
+          src={blobUrl}
+          alt={alt}
+          style={imgStyle}
+          className={cn(
+            "w-full rounded-md border bg-muted/20 object-contain",
+            isVeryTall ? "max-h-[70vh]" : hasDims ? "max-h-[50vh]" : "max-h-96",
+            "cursor-pointer",
+          )}
+          onClick={openLightbox}
+        />
+        <button
+          type="button"
+          className="absolute top-2 right-2 rounded-md bg-black/50 p-1 opacity-0 transition-opacity group-hover:opacity-100"
+          onClick={openLightbox}
+          title="放大查看"
+        >
+          <ZoomIn className="h-4 w-4 text-white" />
+        </button>
+      </div>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          onClick={closeLightbox}
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 rounded-full bg-white/10 p-2 hover:bg-white/20 transition-colors"
+            onClick={closeLightbox}
+            title="关闭"
+          >
+            <X className="h-6 w-6 text-white" />
+          </button>
+          <img
+            src={blobUrl}
+            alt={alt}
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </>
   );
 }

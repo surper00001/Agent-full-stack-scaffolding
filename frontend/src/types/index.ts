@@ -26,6 +26,14 @@ export type {
   UsageRecord,
 } from "./tenant";
 export type {
+  UserListItem,
+  UserDetail,
+  UserConversationItem,
+  UserTokenUsageItem,
+  DailyTokenItem,
+  UserTokenTrend,
+} from "./user-admin";
+export type {
   KBDocument,
   KBDocumentListItem,
   KBDocumentView,

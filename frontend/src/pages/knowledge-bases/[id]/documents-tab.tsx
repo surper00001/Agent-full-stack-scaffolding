@@ -16,7 +16,9 @@ interface DocumentsTabProps {
   kbId: string;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onCancel: (docId: string) => void;
   onDelete: (docId: string, filename: string) => Promise<void>;
+  onRetry: (docId: string, filename: string) => Promise<void>;
   onReprocess: (docId: string, filename: string) => Promise<void>;
   onRefresh: () => void;
 }
@@ -29,7 +31,9 @@ export function DocumentsTab({
   kbId,
   fileInputRef,
   onUpload,
+  onCancel,
   onDelete,
+  onRetry,
   onReprocess,
   onRefresh,
 }: DocumentsTabProps) {
@@ -42,6 +46,9 @@ export function DocumentsTab({
           <ProcessingProgressCard
             key={p.docId}
             progress={p}
+            onCancel={() => onCancel(p.docId)}
+            onDelete={() => onDelete(p.docId, p.filename)}
+            onRetry={() => onRetry(p.docId, p.filename)}
             onReprocess={() => onReprocess(p.docId, p.filename)}
           />
         ))}

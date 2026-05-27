@@ -13,6 +13,8 @@ from src.core.exceptions import ValidationError
 from src.db.session import get_db_session
 from src.models.schemas.knowledge_base import (
     KBDocumentListItem,
+    KBDocumentPageResponse,
+    KBDocumentPagesMetaResponse,
     KBDocumentResponse,
     KBDocumentViewResponse,
     KBProcessProgressResponse,
@@ -183,12 +185,13 @@ async def upload_document(
 async def _process_document_background(
     doc_id: str, kb_id: str, tenant_id: str, _user_id: str
 ) -> None:
-    """后台处理文档任务（独立 session）。"""
+    """后台处理文档任务（独立 session），支持取消信号。"""
     import traceback
 
     from loguru import logger
 
     from src.db.session import AsyncSessionLocal
+    from src.services.knowledge_base_service import _ProcessingCancelled
 
     async with AsyncSessionLocal() as session:
         svc = KnowledgeBaseService(session)
@@ -196,6 +199,9 @@ async def _process_document_background(
             await svc.process_document(doc_id, kb_id, tenant_id, _user_id)
             await session.commit()
             logger.info(f"后台文档处理成功: {doc_id}")
+        except _ProcessingCancelled:
+            await session.commit()
+            logger.info(f"后台文档处理已取消: {doc_id}")
         except Exception:
             await session.rollback()
             logger.error(f"后台文档处理失败:\n{traceback.format_exc()}")
@@ -289,6 +295,44 @@ async def delete_document(
     return APIResponse(message="文档已删除")
 
 
+@router.post("/{kb_id}/documents/{doc_id}/cancel", summary="取消文档处理")
+async def cancel_document(
+    kb_id: str,
+    doc_id: str,
+    tenant_id: str = Depends(get_current_tenant),
+    _current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> APIResponse[dict]:
+    svc = _kb_service(db)
+    ok = await svc.cancel_document(doc_id, kb_id, tenant_id)
+    if not ok:
+        return APIResponse(message="文档已完成或已取消，无法再次取消", data={"cancelled": False})
+    return APIResponse(message="已发出取消信号，后台处理将在下一个检查点停止", data={"cancelled": True})
+
+
+@router.post("/{kb_id}/documents/{doc_id}/retry", summary="重试文档处理")
+async def retry_document(
+    kb_id: str,
+    doc_id: str,
+    background_tasks: BackgroundTasks,
+    tenant_id: str = Depends(get_current_tenant),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> APIResponse[dict]:
+    svc = _kb_service(db)
+    await svc.retry_document(doc_id, kb_id, tenant_id)
+    await db.commit()
+
+    background_tasks.add_task(
+        _process_document_background,
+        doc_id=doc_id,
+        kb_id=kb_id,
+        tenant_id=tenant_id,
+        _user_id=current_user.id,
+    )
+    return APIResponse(message="已提交重试处理", data={"document_id": doc_id})
+
+
 # ==================== 检索 ====================
 
 
@@ -311,7 +355,6 @@ async def reindex_knowledge_base(
     background_tasks: BackgroundTasks,
     tenant_id: str = Depends(get_current_tenant),
     _current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[dict]:
     from loguru import logger
 
@@ -359,13 +402,29 @@ async def search_knowledge_base(
 async def view_document(
     doc_id: str,
     kb_id: str,  # noqa: ARG001
+    page: int | None = None,
     tenant_id: str = Depends(get_current_tenant),
     _current_user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
-) -> APIResponse[KBDocumentViewResponse]:
+) -> APIResponse:
     svc = _kb_service(db)
-    result = await svc.view_document(doc_id, tenant_id)
+    result = await svc.view_document(doc_id, tenant_id, page=page)
+    if page is not None:
+        return APIResponse(data=KBDocumentPageResponse(**result))
     return APIResponse(data=KBDocumentViewResponse(**result))
+
+
+@router.get("/{kb_id}/documents/{doc_id}/pages", summary="文档页面元数据（轻量导航）")
+async def get_document_pages(
+    doc_id: str,
+    kb_id: str,  # noqa: ARG001
+    tenant_id: str = Depends(get_current_tenant),
+    _current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> APIResponse:
+    svc = _kb_service(db)
+    result = await svc.get_document_pages_meta(doc_id, tenant_id)
+    return APIResponse(data=KBDocumentPagesMetaResponse(**result))
 
 
 @router.get("/{kb_id}/documents/{doc_id}/download", summary="下载源文件")

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -27,15 +28,25 @@ from src.services.processing_progress import (
     ProcessingProgressTracker,
     ProcessStage,
 )
+
+# 文档处理并发控制：一次只跑一个文档，避免 MinerU + Embedding + Reranker
+# 同时争抢 CPU（即使限线程，多实例叠加也会打满）
+_doc_process_semaphore = asyncio.Semaphore(1)
+from src.services.rag.embed_text_builder import build_embed_text
 from src.services.rag.hybrid_search_service import HybridSearchService
 from src.services.rag.retrieval_pipeline import RetrievalPipeline
 from src.services.reranker_service import RerankerService, get_reranker_service
-from src.vectorstore.chroma_store import ChromaVectorStore
+from src.vectorstore.base import BaseVectorStore, create_vector_store
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from src.services.document_analyzer import DocStructure
+
+
+class _ProcessingCancelled(Exception):
+    """文档处理被用户取消的内部信号。"""
+    pass
 
 
 class KnowledgeBaseService:
@@ -50,7 +61,7 @@ class KnowledgeBaseService:
         self._doc_processor = DocumentProcessor(self._file_storage)
         self._settings = get_settings()
         self._progress = ProcessingProgressTracker.get_instance()
-        self._vector_store: ChromaVectorStore | None = None
+        self._vector_store: BaseVectorStore | None = None
         self._hybrid_search: HybridSearchService | None = None
         self._retrieval: RetrievalPipeline | None = None
 
@@ -66,9 +77,9 @@ class KnowledgeBaseService:
         return get_reranker_service()
 
     @property
-    def vector_store(self) -> ChromaVectorStore:
+    def vector_store(self) -> BaseVectorStore:
         if self._vector_store is None:
-            self._vector_store = ChromaVectorStore(
+            self._vector_store = create_vector_store(
                 embedding_function=self.embeddings.to_langchain()
             )
         return self._vector_store
@@ -83,102 +94,51 @@ class KnowledgeBaseService:
             )
         return self._retrieval
 
-    _EMBED_TEXT_MAX_CHARS = 2048
-
-    @staticmethod
-    def _truncate_embed_text(text: str, max_chars: int = 2048) -> str:
-        """在中文句号处安全截断 embedding 输入文本。"""
-        if len(text) <= max_chars:
-            return text
-        truncated = text[:max_chars]
-        for punct in ("。", "！", "？", ".", "!", "?"):
-            idx = truncated.rfind(punct)
-            if idx > max_chars // 2:
-                return truncated[: idx + 1]
-        return truncated
-
-    # 文档类型中文标签
-    _DOC_CATEGORY_LABELS: dict[str, str] = {
-        "academic": "学术论文",
-        "technical": "技术文档",
-        "legal": "法律/合同",
-        "report": "报告/白皮书",
-        "markdown": "Markdown 技术文档",
-        "general": "通用文档",
-    }
-
-    # 版面标签中文映射
-    _LAYOUT_TAG_LABELS: dict[str, str] = {
-        "title": "文档标题",
-        "heading": "章节标题",
-        "subtitle": "副标题",
-        "body": "正文",
-        "abstract": "摘要",
-        "keywords": "关键词",
-        "caption": "图表说明",
-        "header": "页眉",
-        "footer": "页脚",
-        "footnote": "脚注",
-        "reference": "参考文献",
-        "list_item": "列表项",
-        "table_body": "表格",
-        "image_region": "图片区域",
-        "code": "代码块",
-    }
-
-    @classmethod
-    def _build_embed_text(cls, chunk: Any) -> str:
-        """构建 metadata-aware embedding 输入。
-
-        结构化前缀帮助向量模型按章节名/类型/语义标签召回，
-        比纯文本 embedding 准确度显著提升。
-        """
-        parts: list[str] = []
-
-        # 文档类型上下文
-        doc_cat = getattr(chunk, "doc_category", None) or ""
-        cat_label = cls._DOC_CATEGORY_LABELS.get(doc_cat, "")
-        if cat_label:
-            parts.append(f"[文档类型] {cat_label}")
-
-        # 版面语义标签
-        layout_tag = getattr(chunk, "layout_tag", None) or ""
-        tag_label = cls._LAYOUT_TAG_LABELS.get(layout_tag, "")
-        if tag_label:
-            parts.append(f"[语义标签] {tag_label}")
-
-        # 章节层级路径（核心召回信号）
-        if chunk.section_path:
-            parts.append(f"[章节路径] {chunk.section_path}")
-        elif chunk.section_title:
-            parts.append(f"[章节] {chunk.section_title}")
-
-        # 标题
-        if chunk.section_title and chunk.section_path:
-            parts.append(f"[小节标题] {chunk.section_title}")
-
-        # 内容摘要（粗粒度语义信号）
-        if chunk.content_summary:
-            parts.append(f"[摘要] {chunk.content_summary}")
-
-        # 正文
-        parts.append(chunk.content)
-
-        full = "\n".join(parts)
-        if len(full) > cls._EMBED_TEXT_MAX_CHARS:
-            from loguru import logger
-
-            logger.warning(
-                f"embedding 文本超长已截断: chunk={getattr(chunk, 'chunk_id', '?')} "
-                f"len={len(full)} max={cls._EMBED_TEXT_MAX_CHARS}"
-            )
-            return cls._truncate_embed_text(full, cls._EMBED_TEXT_MAX_CHARS)
-        return full
-
     def _kb_collection_name(self, kb_id: str) -> str:
         return f"kb_{kb_id}"
 
     _VECTOR_DELETE_BATCH = 500
+
+    @staticmethod
+    def _sync_fts_delete_document(kb_id: str, tenant_id: str, doc_id: str) -> None:
+        """FTS5 增量清理：删除单个文档的 chunk 索引。"""
+        try:
+            from src.services.rag.bm25_fts import get_bm25_fts_retriever
+
+            fts = get_bm25_fts_retriever()
+            fts.delete_by_document(tenant_id, kb_id, doc_id)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _sync_fts_drop(kb_id: str, tenant_id: str) -> None:
+        """FTS5 清理：删除整个 KB 的索引表。"""
+        try:
+            from src.services.rag.bm25_fts import get_bm25_fts_retriever
+
+            fts = get_bm25_fts_retriever()
+            fts.drop_index(tenant_id, kb_id)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _sync_fts_add_chunks(kb_id: str, tenant_id: str, chunks: list[KBChunk]) -> None:
+        """FTS5 增量写入：文档处理完成后将 chunk 加入 BM25 索引。
+
+        注意：run_in_executor 调用，避免阻塞事件循环。
+        失败静默——搜索时若索引缺失会自动重建。
+        """
+        try:
+            from src.services.rag.bm25_fts import get_bm25_fts_retriever
+
+            fts = get_bm25_fts_retriever()
+            # 如果 FTS5 表不存在则全量构建；否则增量写入
+            if not fts.table_exists(tenant_id, kb_id):
+                logger.info(f"FTS5 表不存在，跳过增量写入（搜索时自动全量构建）: kb={kb_id}")
+                return
+            fts.add_chunks(tenant_id, kb_id, chunks)
+        except Exception:
+            pass
 
     async def _purge_document_vectors(
         self, doc_id: str, kb_id: str, tenant_id: str
@@ -229,6 +189,9 @@ class KnowledgeBaseService:
             tenant_id=tenant_id, document_id=doc.id
         )
         logger.info(f"已物理删除 {removed} 个 chunk, doc_id={doc.id}")
+
+        # FTS5 增量清理：删除单文档 chunk 而不重建全表
+        self._sync_fts_delete_document(kb.id, tenant_id, doc.id)
 
         kb.document_count = max(0, kb.document_count - 1)
         kb.total_chunks = max(0, kb.total_chunks - doc.chunk_count)
@@ -349,6 +312,8 @@ class KnowledgeBaseService:
         await self._doc_repo.soft_delete_by_filter(
             tenant_id=tenant_id, knowledge_base_id=kb_id
         )
+        # FTS5 清理：删除整个 KB 的索引表
+        self._sync_fts_drop(kb_id, tenant_id)
         for doc in docs:
             self._progress.cleanup(doc.id)
 
@@ -407,6 +372,7 @@ class KnowledgeBaseService:
         """处理文档：分析 → 解析 → 智能分块 → 向量化 → 索引（后台任务）。
 
         每阶段更新进度追踪器，供前端轮询。
+        使用全局信号量确保一次只处理一个文档，避免多个模型同时跑满 CPU。
         """
         doc = await self._doc_repo.get_by_id_with_tenant(doc_id, tenant_id)
         if doc is None:
@@ -414,16 +380,20 @@ class KnowledgeBaseService:
 
         doc_structure: DocStructure | None = None  # type: ignore[name-defined]
 
+        # 获取全局信号量，确保一次只处理一个文档（MinerU + Embedding + Reranker 都是 CPU 密集）
+        await _doc_process_semaphore.acquire()
         try:
             # ---- 阶段 1: 文档结构分析 ----
             doc.status = "processing"
             await self._doc_repo.update(doc)
             self._progress.set_stage(doc_id, ProcessStage.ANALYZING)
+            self._check_cancelled(doc_id)
 
             kb = await self.get_kb(kb_id, tenant_id)
 
             # ---- 阶段 2: 文档解析 ----
             self._progress.set_stage(doc_id, ProcessStage.PARSING)
+            self._check_cancelled(doc_id)
 
             import asyncio
             blocks, page_count, metadata, doc_structure = await asyncio.to_thread(
@@ -465,6 +435,7 @@ class KnowledgeBaseService:
             await self._doc_repo.update(doc)
 
             # ---- 阶段 3: 智能分块 ----
+            self._check_cancelled(doc_id)
             self._progress.set_stage(doc_id, ProcessStage.CHUNKING)
 
             chunker = ChunkingService(
@@ -483,11 +454,22 @@ class KnowledgeBaseService:
 
             embedding_model = kb.embedding_model or self._settings.kb_embedding_model
             embedding_svc = self._get_embedding_service(embedding_model)
-            chunk_texts = [self._build_embed_text(c) for c in chunks]
-            batch_size = 32
+            # 构建 refs_captions 查找表（chunk_id → caption）
+            refs_captions: dict[str, str] = {}
+            for c in chunks:
+                caption = c.table_caption or c.image_caption or c.image_description or ""
+                if caption:
+                    refs_captions[c.chunk_id] = caption
+
+            chunk_texts = [
+                build_embed_text(c, doc_filename=doc.filename, refs_captions=refs_captions)
+                for c in chunks
+            ]
+            batch_size = 16
             all_embeddings: list[list[float]] = []
             total_chunks = len(chunk_texts)
             for batch_start in range(0, total_chunks, batch_size):
+                self._check_cancelled(doc_id)
                 batch = chunk_texts[batch_start : batch_start + batch_size]
                 batch_embeddings = await embedding_svc.embed_documents(batch)
                 all_embeddings.extend(batch_embeddings)
@@ -495,6 +477,7 @@ class KnowledgeBaseService:
                 self._progress.update_embed(doc_id, done)
 
             # ---- 阶段 5: 索引（metadata 写入 embedding_model 版本标记） ----
+            self._check_cancelled(doc_id)
             self._progress.set_stage(doc_id, ProcessStage.INDEXING)
 
             chunk_ids = [c.chunk_id for c in chunks]
@@ -519,9 +502,16 @@ class KnowledgeBaseService:
                         "ocr_error": chunk.ocr_error or "",
                         "image_caption": chunk.image_caption or "",
                         "image_description": chunk.image_description or "",
+                        "table_caption": chunk.table_caption or "",
+                        "image_width": chunk.image_width,
+                        "image_height": chunk.image_height,
                         "section_title": chunk.section_title or "",
                         "section_path": chunk.section_path or "",
+                        "title": chunk.title or chunk.section_title or "",
                         "content_summary": chunk.content_summary or "",
+                        "table_refs": chunk.table_refs or [],
+                        "image_refs": chunk.image_refs or [],
+                        "document_filename": doc.filename,
                         **(
                             {"bbox": list(chunk.bbox)}
                             if chunk.bbox
@@ -552,8 +542,10 @@ class KnowledgeBaseService:
                         "image_path": chunk.image_path,
                         "image_caption": chunk.image_caption,
                         "image_description": chunk.image_description,
+                        "table_caption": chunk.table_caption,
                         "section_title": chunk.section_title,
                         "section_path": chunk.section_path,
+                        "title": chunk.title or chunk.section_title,
                         "ocr_status": chunk.ocr_status,
                         "ocr_error": chunk.ocr_error,
                         "content_summary": chunk.content_summary,
@@ -561,6 +553,9 @@ class KnowledgeBaseService:
                         "heading_level": chunk.heading_level,
                         "doc_category": chunk.doc_category,
                         "layout_tag": chunk.layout_tag,
+                        "table_refs": chunk.table_refs,
+                        "image_refs": chunk.image_refs,
+                        "document_filename": doc.filename,
                     },
                 )
                 kb_chunks.append(kb_chunk)
@@ -580,6 +575,15 @@ class KnowledgeBaseService:
             for kb_chunk in kb_chunks:
                 self._session.add(kb_chunk)
             await self._session.flush()
+
+            # FTS5 增量索引：后台线程写入，不阻塞事件循环
+            import asyncio as _asyncio
+            _loop = _asyncio.get_running_loop()
+            _loop.run_in_executor(
+                None,
+                self._sync_fts_add_chunks,
+                kb_id, tenant_id, kb_chunks,
+            )
 
             # ---- 完成 ----
             doc.chunk_count = len(chunks)
@@ -606,6 +610,21 @@ class KnowledgeBaseService:
                 f"父块={parent_ids}"
             )
 
+        except _ProcessingCancelled:
+            # 用户取消 —— 清理已写入的向量和 chunk，不标记为 error
+            logger.info(f"文档处理已取消: {doc_id}")
+            self._progress.set_cancelled(doc_id)
+            with contextlib.suppress(Exception):
+                await self._purge_document_vectors(doc_id, kb_id, tenant_id)
+            with contextlib.suppress(Exception):
+                await self._chunk_repo.hard_delete_by_filter(
+                    tenant_id=tenant_id, document_id=doc_id
+                )
+            doc.status = "uploaded"
+            doc.error_message = None
+            await self._doc_repo.update(doc)
+            await self._session.commit()
+            raise
         except Exception as e:
             logger.error(f"文档处理失败: {doc_id} - {e}")
             self._progress.set_error(doc_id, str(e))
@@ -614,6 +633,8 @@ class KnowledgeBaseService:
             await self._doc_repo.update(doc)
             await self._session.commit()
             raise
+        finally:
+            _doc_process_semaphore.release()
 
     async def prepare_reprocess(self, doc_id: str, kb_id: str, tenant_id: str) -> None:
         """校验并重置文档状态，供后台重新处理。"""
@@ -659,7 +680,61 @@ class KnowledgeBaseService:
     ) -> None:
         doc = await self.get_document(doc_id, tenant_id)
         kb = await self.get_kb(kb_id, tenant_id)
+        # 如果正在处理中，先发出取消信号
+        self._progress.cancel(doc_id)
         await self._purge_document(doc, kb, tenant_id)
+
+    def _check_cancelled(self, doc_id: str) -> None:
+        """检查文档处理是否已被取消，若是则抛出 _ProcessingCancelled 信号。"""
+        if self._progress.is_cancelled(doc_id):
+            raise _ProcessingCancelled(f"文档 {doc_id} 处理已被取消")
+
+    async def cancel_document(
+        self, doc_id: str, kb_id: str, tenant_id: str
+    ) -> bool:
+        """取消正在处理的文档，清理部分数据后回到 uploaded 状态。
+
+        返回 True 表示已发出取消信号（后台任务会在下一个检查点停止），
+        返回 False 表示文档已完成/已失败/已取消，无法再取消。
+        """
+        doc = await self.get_document(doc_id, tenant_id)
+        if doc.knowledge_base_id != kb_id:
+            raise ValidationError("文档不属于指定知识库")
+
+        if not self._progress.cancel(doc_id):
+            return False
+
+        logger.info(f"文档处理取消请求: {doc_id}")
+        return True
+
+    async def retry_document(
+        self, doc_id: str, kb_id: str, tenant_id: str
+    ) -> None:
+        """重置文档状态并返回 uploaded，供前端重新发起处理。
+
+        适用于 error / cancelled / uploaded 状态的文档。
+        """
+        doc = await self.get_document(doc_id, tenant_id)
+        if doc.knowledge_base_id != kb_id:
+            raise ValidationError("文档不属于指定知识库")
+
+        # 清理残留数据
+        with contextlib.suppress(Exception):
+            await self._purge_document_vectors(doc_id, kb_id, tenant_id)
+        with contextlib.suppress(Exception):
+            await self._chunk_repo.hard_delete_by_filter(
+                tenant_id=tenant_id, document_id=doc_id
+            )
+        with contextlib.suppress(Exception):
+            self._file_storage.delete_mineru_output(doc_id)
+
+        doc.status = "uploaded"
+        doc.error_message = None
+        doc.chunk_count = 0
+        await self._doc_repo.update(doc)
+        self._progress.cleanup(doc_id)
+        self._progress.start(doc_id, doc.file_size or 0)
+        logger.info(f"文档已重置: {doc_id}")
 
     # ========== 检索 ==========
 
@@ -743,21 +818,41 @@ class KnowledgeBaseService:
                     old_ids, self._kb_collection_name(kb_id), tenant_id
                 )
 
+            # 构建 refs_captions（从已有 chunk metadata 恢复）
+            refs_captions: dict[str, str] = {}
+            for c in chunks:
+                meta = c.metadata_ or {}
+                caption = meta.get("table_caption") or meta.get("image_caption") or meta.get("image_description") or ""
+                if caption:
+                    refs_captions[c.vector_id or c.id] = caption
+
             chunk_texts = []
             for c in chunks:
                 meta = c.metadata_ or {}
                 from types import SimpleNamespace
 
                 ns = SimpleNamespace(
+                    chunk_id=c.vector_id or c.id,
                     content=c.content,
                     section_path=meta.get("section_path"),
                     section_title=meta.get("section_title"),
+                    title=meta.get("title") or meta.get("section_title"),
                     content_summary=meta.get("content_summary"),
+                    doc_category=meta.get("doc_category"),
+                    layout_tag=meta.get("layout_tag"),
+                    table_refs=meta.get("table_refs") or [],
+                    image_refs=meta.get("image_refs") or [],
                 )
-                chunk_texts.append(self._build_embed_text(ns))
+                chunk_texts.append(
+                    build_embed_text(
+                        ns,
+                        doc_filename=doc.filename,
+                        refs_captions=refs_captions,
+                    )
+                )
 
             all_embeddings: list[list[float]] = []
-            batch_size = 32
+            batch_size = 16
             for batch_start in range(0, len(chunk_texts), batch_size):
                 batch = chunk_texts[batch_start : batch_start + batch_size]
                 all_embeddings.extend(await embedding_svc.embed_documents(batch))
@@ -789,7 +884,16 @@ class KnowledgeBaseService:
                             **({"bbox": bbox} if bbox else {}),
                             "section_title": meta.get("section_title", ""),
                             "section_path": meta.get("section_path", ""),
+                            "title": meta.get("title") or meta.get("section_title", ""),
                             "content_summary": meta.get("content_summary", ""),
+                            "table_refs": meta.get("table_refs") or [],
+                            "image_refs": meta.get("image_refs") or [],
+                            "table_caption": meta.get("table_caption") or "",
+                            "document_filename": doc.filename,
+                            "doc_category": meta.get("doc_category", ""),
+                            "is_heading": meta.get("is_heading", False),
+                            "heading_level": meta.get("heading_level", 0),
+                            "layout_tag": meta.get("layout_tag", ""),
                             "embedding_model": embedding_model,
                         },
                     )
@@ -831,56 +935,107 @@ class KnowledgeBaseService:
 
     # ========== 文档查看 ==========
 
-    async def view_document(self, doc_id: str, tenant_id: str) -> dict[str, Any]:
+    async def view_document(
+        self, doc_id: str, tenant_id: str, page: int | None = None,
+    ) -> dict[str, Any]:
+        """查看文档内容。指定 page 时仅返回该页，不指定时返回全部（兼容旧调用）。"""
         doc = await self.get_document(doc_id, tenant_id)
         kb_id = doc.knowledge_base_id
 
         chunks = await self._chunk_repo.list_all(
-            tenant_id=tenant_id, document_id=doc_id, limit=100000
+            tenant_id=tenant_id, document_id=doc_id, limit=100000,
         )
         chunks.sort(key=lambda c: (c.page_start, c.chunk_index))
 
         pages: dict[int, list[dict]] = {}
         page_dims = (doc.metadata_ or {}).get("page_dimensions") or {}
         for chunk in chunks:
-            page = chunk.page_start
+            p = chunk.page_start
+            if page is not None and p != page:
+                continue  # 按需过滤，跳过不需要的页
             meta = chunk.metadata_ or {}
             image_path = meta.get("image_path")
-            pages.setdefault(page, []).append({
+            pages.setdefault(p, []).append({
                 "type": chunk.chunk_type,
                 "content": chunk.content,
-                "page": page,
+                "page": p,
                 "bbox": meta.get("bbox"),
                 "table_html": meta.get("table_html"),
                 "image_path": image_path,
                 "image_url": self._build_image_url(kb_id, doc_id, image_path, doc.stored_path),
+                "is_table_image": chunk.chunk_type == "table" and bool(image_path),
                 "ocr_status": meta.get("ocr_status"),
                 "ocr_error": meta.get("ocr_error"),
                 "image_caption": meta.get("image_caption"),
                 "image_description": meta.get("image_description"),
+                "table_caption": meta.get("table_caption"),
+                "image_width": meta.get("image_width"),
+                "image_height": meta.get("image_height"),
                 "section_title": meta.get("section_title"),
                 "section_path": meta.get("section_path"),
             })
 
         total_pages = doc.page_count or max(pages.keys(), default=1)
-        page_list = []
-        for p in range(1, total_pages + 1):
+
+        def _page_content(p: int) -> dict:
             dim = page_dims.get(str(p)) or {}
             block_list = pages.get(p, [])
-            page_list.append({
+            return {
                 "page_number": p,
                 "page_width": dim.get("width"),
                 "page_height": dim.get("height"),
                 "text_blocks": block_list,
                 "has_content": len(block_list) > 0,
-            })
+            }
 
+        if page is not None:
+            # 单页模式
+            return {
+                "document_id": doc.id,
+                "filename": doc.filename,
+                "file_type": doc.file_type,
+                "total_pages": total_pages,
+                "page": _page_content(page),
+                "doc_category": doc.metadata_.get("doc_category") if doc.metadata_ else None,
+                "doc_category_label": doc.metadata_.get("doc_category_label") if doc.metadata_ else None,
+            }
+
+        # 全量模式（兼容旧调用）
+        page_list = [_page_content(p) for p in range(1, total_pages + 1)]
         return {
             "document_id": doc.id,
             "filename": doc.filename,
             "file_type": doc.file_type,
             "total_pages": total_pages,
             "pages": page_list,
+            "doc_category": doc.metadata_.get("doc_category") if doc.metadata_ else None,
+            "doc_category_label": doc.metadata_.get("doc_category_label") if doc.metadata_ else None,
+        }
+
+    async def get_document_pages_meta(
+        self, doc_id: str, tenant_id: str,
+    ) -> dict[str, Any]:
+        """获取文档页面元数据（轻量，仅用于页码导航）。"""
+        doc = await self.get_document(doc_id, tenant_id)
+
+        # 只查 chunk_type + page_start，不加载 content/text 等大字段
+        chunks = await self._chunk_repo.list_all(
+            tenant_id=tenant_id, document_id=doc_id, limit=100000,
+        )
+        pages_with_content: set[int] = {c.page_start for c in chunks}
+
+        total_pages = doc.page_count or max(pages_with_content, default=1)
+        pages_meta = [
+            {"page_number": p, "has_content": p in pages_with_content}
+            for p in range(1, total_pages + 1)
+        ]
+
+        return {
+            "document_id": doc.id,
+            "filename": doc.filename,
+            "file_type": doc.file_type,
+            "total_pages": total_pages,
+            "pages": pages_meta,
             "doc_category": doc.metadata_.get("doc_category") if doc.metadata_ else None,
             "doc_category_label": doc.metadata_.get("doc_category_label") if doc.metadata_ else None,
         }
@@ -904,7 +1059,11 @@ class KnowledgeBaseService:
         relative_path = str(
             Path(tenant_id) / kb.user_id / doc.knowledge_base_id / "thumbnails" / doc_id / image_name
         )
-        content = self._file_storage.read_thumbnail(relative_path)
+        try:
+            content = self._file_storage.read_thumbnail(relative_path)
+        except FileNotFoundError:
+            from src.core.exceptions import NotFoundError
+            raise NotFoundError(f"图片文件不存在: {image_name}")
         ext = image_name.rsplit(".", 1)[-1].lower() if "." in image_name else "png"
         return content, ext
 

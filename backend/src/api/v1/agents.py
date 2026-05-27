@@ -15,7 +15,7 @@ from src.models.schemas.request import (
     PaginationParams,
     UpdateAgentRequest,
 )
-from src.models.schemas.response import APIResponse, AgentConfigItem, PaginatedData
+from src.models.schemas.response import AgentConfigItem, APIResponse, PaginatedData
 from src.services.agent_service import AgentService
 
 router = APIRouter(prefix="/agents", tags=["Agent 管理"])

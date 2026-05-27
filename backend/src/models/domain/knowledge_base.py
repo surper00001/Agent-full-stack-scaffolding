@@ -6,7 +6,7 @@ KBDocument  → 上传的源文件
 KBChunk     → 文档分块（文本/表格/图片）
 """
 
-from sqlalchemy import ForeignKey, Integer, JSON, String, Text, UUID
+from sqlalchemy import JSON, UUID, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.base import BaseModel

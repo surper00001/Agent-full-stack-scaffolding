@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Protocol
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, Protocol
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
@@ -23,8 +22,11 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
-class ContextStrategy(str, Enum):
+
+class ContextStrategy(StrEnum):
     SLIDING_WINDOW = "sliding_window"
     SUMMARIZE = "summarize"
     SELECTIVE = "selective"

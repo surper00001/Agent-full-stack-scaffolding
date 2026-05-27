@@ -12,15 +12,21 @@ from langchain_core.documents import Document
 from loguru import logger
 
 if TYPE_CHECKING:
-    from src.vectorstore.chroma_store import ChromaVectorStore
+    from src.vectorstore.base import BaseVectorStore
 
 
 class HybridSearchService:
-    """BM25 + 向量检索的 RRF 融合。"""
+    """BM25 + 向量检索的 RRF 融合。
 
-    def __init__(self, vector_store: ChromaVectorStore) -> None:
+    支持两种 BM25 后端：
+    - memory: 全量加载到内存（rank_bm25），适合小 KB
+    - sqlite_fts5: SQLite FTS5 磁盘索引，启动零内存
+    """
+
+    def __init__(self, vector_store: BaseVectorStore) -> None:
         self._vector_store = vector_store
         self._bm25_cache: dict[str, Any] = {}
+        self._fts_retriever = None  # lazy init for sqlite_fts5 backend
 
     async def search(
         self,
@@ -30,7 +36,7 @@ class HybridSearchService:
         query_vector: list[float],
         collection_name: str,
         top_k: int,
-        chroma_filter: dict[str, Any] | None,
+        vector_filter: dict[str, Any] | None,
         chunk_repo: Any,
     ) -> list[Document]:
         """执行混合检索并返回融合后的 Document 列表。"""
@@ -39,7 +45,7 @@ class HybridSearchService:
             collection_name=collection_name,
             tenant_id=tenant_id,
             top_k=top_k,
-            filter=chroma_filter,
+            filter=vector_filter,
         )
 
         try:
@@ -59,7 +65,89 @@ class HybridSearchService:
         top_k: int,
         chunk_repo: Any,
     ) -> list[tuple[str, Document]]:
-        """BM25 关键词检索，返回 (chunk_id, Document) 列表。"""
+        """BM25 关键词检索，返回 (chunk_id, Document) 列表。
+
+        后端选择: 根据 kb_bm25_backend 配置自动切换 memory / sqlite_fts5。
+        """
+        from src.core.config import get_settings
+
+        settings = get_settings()
+        if settings.kb_bm25_backend == "sqlite_fts5":
+            return await self._bm25_search_fts5(kb_id, tenant_id, query, top_k, chunk_repo)
+        return await self._bm25_search_memory(kb_id, tenant_id, query, top_k, chunk_repo)
+
+    async def _bm25_search_fts5(
+        self,
+        kb_id: str,
+        tenant_id: str,
+        query: str,
+        top_k: int,
+        chunk_repo: Any,
+    ) -> list[tuple[str, Document]]:
+        """SQLite FTS5 路径 —— 零内存 BM25 检索。"""
+        from src.services.rag.bm25_fts import get_bm25_fts_retriever
+
+        if self._fts_retriever is None:
+            self._fts_retriever = get_bm25_fts_retriever()
+
+        # 如果 FTS5 表不存在，后台构建 + 本次降级（跳过 BM25）
+        if not self._fts_retriever.table_exists(tenant_id, kb_id):
+            logger.info(
+                f"FTS5 索引不存在，触发后台构建 + 本次降级纯向量: kb={kb_id}"
+            )
+            # 触发后台构建（不等待），避免阻塞首次搜索
+            asyncio = __import__("asyncio")
+            asyncio.ensure_future(
+                self._build_fts5_background(kb_id, tenant_id, chunk_repo)
+            )
+            return []  # 降级：本次跳过 BM25
+
+        fts_results = self._fts_retriever.search(tenant_id, kb_id, query, top_k)
+
+        # 批量加载 chunk 元数据
+        chunk_ids = [cid for _, cid, _ in fts_results]
+        if not chunk_ids:
+            return []
+
+        from src.models.domain.knowledge_base import KBChunk
+
+        chunk_map = await self._load_chunks_by_ids(chunk_ids, chunk_repo, KBChunk)
+
+        results: list[tuple[str, Document]] = []
+        for bm25_score, chunk_id, fts_meta in fts_results:
+            chunk = chunk_map.get(chunk_id)
+            if chunk is None:
+                continue
+            meta = chunk.metadata_ or {}
+            doc = Document(
+                page_content=chunk.content,
+                metadata={
+                    "chunk_id": chunk.vector_id or chunk.id,
+                    "document_id": chunk.document_id,
+                    "chunk_index": chunk.chunk_index,
+                    "page_start": chunk.page_start or fts_meta.get("page_start", 1),
+                    "page_end": chunk.page_end or 1,
+                    "chunk_type": chunk.chunk_type or "text",
+                    "parent_chunk_id": chunk.parent_chunk_id,
+                    "section_title": meta.get("section_title", ""),
+                    "section_path": meta.get("section_path", ""),
+                    "content_summary": meta.get("content_summary", ""),
+                    "bm25_score": float(bm25_score),
+                    "score": float(bm25_score),
+                },
+            )
+            results.append((chunk.vector_id or chunk.id, doc))
+        return results
+
+    async def _bm25_search_memory(
+        self,
+        kb_id: str,
+        tenant_id: str,
+        query: str,
+        top_k: int,
+        chunk_repo: Any,
+    ) -> list[tuple[str, Document]]:
+        """内存 rank_bm25 路径（旧实现，保留兼容）。"""
         import jieba
         from rank_bm25 import BM25Okapi
 
@@ -133,6 +221,54 @@ class HybridSearchService:
             merged.append(doc)
         return merged
 
+    async def _build_fts5_background(
+        self,
+        kb_id: str,
+        tenant_id: str,
+        chunk_repo: Any,
+    ) -> None:
+        """后台异步构建 FTS5 索引，避免阻塞首次搜索。"""
+        import asyncio as _asyncio
+
+        try:
+            chunks = await chunk_repo.list_all(
+                tenant_id=tenant_id, knowledge_base_id=kb_id, limit=100000
+            )
+            if chunks:
+                # run_in_executor 将 CPU 密集的构建操作放到线程池
+                loop = _asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None,
+                    self._fts_retriever.build_index,
+                    tenant_id, kb_id, chunks,
+                )
+                logger.info(
+                    f"FTS5 后台构建完成: kb={kb_id}, chunks={len(chunks)}"
+                )
+        except Exception as e:
+            logger.warning(f"FTS5 后台构建失败: kb={kb_id}, err={e}")
+
     def invalidate_cache(self, kb_id: str, tenant_id: str) -> None:
         """文档变更后清除 BM25 缓存。"""
         self._bm25_cache.pop(f"{tenant_id}:{kb_id}", None)
+        # FTS5 路径：删除旧表，下次搜索时自动重建
+        if self._fts_retriever is not None:
+            try:
+                self._fts_retriever.drop_index(tenant_id, kb_id)
+            except Exception:
+                pass
+
+    @staticmethod
+    async def _load_chunks_by_ids(
+        chunk_ids: list[str],
+        chunk_repo: Any,
+        chunk_model: Any,
+    ) -> dict[str, Any]:
+        """批量加载 chunk 对象，返回 {chunk_id: chunk} 映射。"""
+        from sqlalchemy import select
+
+        if not chunk_ids:
+            return {}
+        stmt = select(chunk_model).where(chunk_model.id.in_(chunk_ids))
+        result = await chunk_repo._session.execute(stmt)
+        return {c.id: c for c in result.scalars().all()}

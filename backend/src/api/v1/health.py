@@ -29,9 +29,9 @@ async def health_check() -> APIResponse[HealthResponse]:
 
     # 检查向量数据库
     try:
-        from src.vectorstore.chroma_store import ChromaVectorStore
+        from src.vectorstore.base import create_vector_store
 
-        store = ChromaVectorStore()
+        store = create_vector_store()
         vdb = await store.health_check()
         checks["vector_store"] = "healthy" if vdb else "unhealthy"
     except Exception as e:

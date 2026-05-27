@@ -1,0 +1,146 @@
+/* ── 思维导图 Canvas 渲染器样式 ─────────────────────────── */
+
+/* ── 节点文字：纯色高对比，无描边光晕 ─────────────────── */
+.mindmap-canvas svg .markmap-node text {
+  fill: #0f172a;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* 子节点按层级递减字号 */
+.mindmap-canvas svg .markmap-node[data-depth="1"] text {
+  font-size: 14px;
+}
+.mindmap-canvas svg .markmap-node[data-depth="2"] text {
+  font-size: 13px;
+}
+.mindmap-canvas svg .markmap-node[data-depth="3"] text {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ── 折叠圆点：放大 + 加大点击热区 ───────────────────── */
+.mindmap-canvas svg .markmap-node > circle {
+  r: 12px;
+  stroke: rgba(0, 0, 0, 0.15);
+  stroke-width: 2px;
+  fill: #ffffff;
+  cursor: pointer;
+  transition: r 120ms ease, stroke-width 120ms ease;
+}
+
+.mindmap-canvas svg .markmap-node > circle:hover {
+  r: 15px;
+  stroke-width: 3px;
+  stroke: rgba(99, 102, 241, 0.5);
+}
+
+.mindmap-canvas svg .markmap-node > circle:active {
+  r: 13px;
+  fill: #eef2ff;
+}
+
+/* 有子节点的折叠圆点颜色跟随主题 */
+.mindmap-canvas svg .markmap-node > circle[data-depth] {
+  fill: rgba(99, 102, 241, 0.08);
+  stroke: rgba(99, 102, 241, 0.35);
+}
+
+/* ── 节点背景：完全透明，不覆盖文字 ──────────────────── */
+.mindmap-canvas svg .markmap-node > g > rect {
+  fill: transparent !important;
+  stroke: none;
+}
+
+/* hover 时出现微弱背景提示 */
+.mindmap-canvas svg .markmap-node > g:hover > rect {
+  fill: rgba(0, 0, 0, 0.04) !important;
+  stroke: rgba(0, 0, 0, 0.06);
+  stroke-width: 1px;
+  rx: 6px;
+  ry: 6px;
+}
+
+/* ── 连线更清晰 ────────────────────────────────────── */
+.mindmap-canvas svg .markmap-link {
+  stroke: rgba(0, 0, 0, 0.18);
+  stroke-width: 1.5px;
+  fill: none;
+}
+
+/* ── 编辑模式选中节点 ───────────────────────────────── */
+.mindmap-canvas .markmap-node.selected > g > rect {
+  stroke: #f59e0b;
+  stroke-width: 2.5px;
+  stroke-dasharray: 6 3;
+  animation: mindmap-selection-pulse 2s ease-in-out infinite;
+}
+
+/* ── 动画 ──────────────────────────────────────────── */
+@keyframes mindmap-selection-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.4; }
+}
+
+@keyframes slide-in-down {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-in-down {
+  animation: slide-in-down 150ms ease-out;
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-scale-in {
+  animation: scale-in 150ms ease-out;
+}
+
+/* ══════════════════════════════════════════════════════
+   深色模式覆盖
+   ══════════════════════════════════════════════════════ */
+
+.dark .mindmap-canvas svg .markmap-node text {
+  fill: #f1f5f9;
+}
+
+.dark .mindmap-canvas svg .markmap-node > circle {
+  stroke: rgba(255, 255, 255, 0.12);
+  fill: rgba(255, 255, 255, 0.05);
+}
+
+.dark .mindmap-canvas svg .markmap-node > circle:hover {
+  stroke: rgba(129, 140, 248, 0.5);
+  fill: rgba(99, 102, 241, 0.12);
+}
+
+.dark .mindmap-canvas svg .markmap-node > circle:active {
+  fill: rgba(99, 102, 241, 0.18);
+}
+
+.dark .mindmap-canvas svg .markmap-node > circle[data-depth] {
+  fill: rgba(99, 102, 241, 0.1);
+  stroke: rgba(129, 140, 248, 0.3);
+}
+
+.dark .mindmap-canvas svg .markmap-node > g > rect {
+  fill: transparent !important;
+  stroke: none;
+}
+
+.dark .mindmap-canvas svg .markmap-node > g:hover > rect {
+  fill: rgba(255, 255, 255, 0.05) !important;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 1px;
+  rx: 6px;
+  ry: 6px;
+}
+
+.dark .mindmap-canvas svg .markmap-link {
+  stroke: rgba(255, 255, 255, 0.15);
+}

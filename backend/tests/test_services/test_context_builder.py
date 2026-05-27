@@ -23,13 +23,15 @@ def test_format_context_text_includes_source_and_score() -> None:
             page=3,
             score=0.87,
             section_title="认证",
+            title="3.1 认证机制",
         )
     ]
     text = format_context_text(citations)
     assert "api.pdf" in text
     assert "JWT 认证流程说明" in text
     assert "87%" in text
-    assert "认证" in text
+    # title 优先于 section_title
+    assert "3.1 认证机制" in text
 
 
 @pytest.mark.unit
@@ -66,9 +68,9 @@ def test_parse_tool_result_citations() -> None:
 
 @pytest.mark.unit
 def test_merge_citations_dedup_by_chunk_id() -> None:
-    a = CitationItem("id1", "v1", "s", 1, 0.3)
-    b = CitationItem("id1", "v2", "s", 1, 0.9)
-    c = CitationItem("id2", "v3", "s", 1, 0.5)
+    a = CitationItem("id1", "v1", "s", 1, 0.3, title="")
+    b = CitationItem("id1", "v2", "s", 1, 0.9, title="")
+    c = CitationItem("id2", "v3", "s", 1, 0.5, title="")
     merged = merge_citations([a], [b, c])
     assert len(merged) == 2
     by_id = {m.chunk_id: m for m in merged}

@@ -84,7 +84,7 @@ export interface KBSearchResultItem {
   document_id: string;
   content: string;
   expanded_content?: string;
-  chunk_type: "text" | "table" | "image" | "code";
+  chunk_type: "text" | "table" | "image" | "code" | "reference" | "formula";
   page_start: number;
   page_end: number;
   score: number;
@@ -94,6 +94,8 @@ export interface KBSearchResultItem {
     table_html?: string;
     image_path?: string;
     image_url?: string;
+    is_table_image?: boolean | null;
+    table_caption?: string | null;
     ocr_status?: string;
     ocr_error?: string;
     image_caption?: string;
@@ -104,6 +106,8 @@ export interface KBSearchResultItem {
     content_summary?: string;
     doc_category?: string;
     bbox?: number[];
+    image_width?: number | null;
+    image_height?: number | null;
   } | null;
   context_before: string | null;
   context_after: string | null;
@@ -161,6 +165,8 @@ export interface KBPageBlock {
   image_caption?: string | null;
   image_description?: string | null;
   section_title: string | null;
+  image_width?: number | null;
+  image_height?: number | null;
 }
 
 export interface KBPageContent {
@@ -177,6 +183,28 @@ export interface KBDocumentView {
   file_type: string;
   total_pages: number;
   pages: KBPageContent[];
+  doc_category?: string;
+  doc_category_label?: string;
+}
+
+/** 单页查看响应（按需加载） */
+export interface KBDocumentPage {
+  document_id: string;
+  filename: string;
+  file_type: string;
+  total_pages: number;
+  page: KBPageContent;
+  doc_category?: string;
+  doc_category_label?: string;
+}
+
+/** 页面元数据（轻量导航） */
+export interface KBDocumentPagesMeta {
+  document_id: string;
+  filename: string;
+  file_type: string;
+  total_pages: number;
+  pages: { page_number: number; has_content: boolean }[];
   doc_category?: string;
   doc_category_label?: string;
 }

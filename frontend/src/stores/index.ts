@@ -4,3 +4,4 @@ export { useUIStore } from "./ui-store";
 export { useTenantStore } from "./tenant-store";
 export { useKBStore } from "./knowledge-base-store";
 export { useConversationStore } from "./conversation-store";
+export { useUserAdminStore } from "./user-admin-store";

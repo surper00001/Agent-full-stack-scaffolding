@@ -14,6 +14,8 @@ import AdminAgentsPage from "@/pages/admin/agents";
 import AdminAgentDetailPage from "@/pages/admin/agents/[id]";
 import AdminConversationsPage from "@/pages/admin/conversations";
 import AdminTenantPage from "@/pages/admin/tenant";
+import AdminUsersPage from "@/pages/admin/users";
+import AdminUserDetailPage from "@/pages/admin/users/[id]";
 import LoginPage from "@/pages/login";
 import RegisterPage from "@/pages/register";
 import NotFoundPage from "@/pages/not-found";
@@ -53,6 +55,8 @@ export function AppRoutes() {
           <Route path="admin/agents/:id" element={<AdminAgentDetailPage />} />
           <Route path="admin/conversations" element={<AdminConversationsPage />} />
           <Route path="admin/tenant" element={<AdminTenantPage />} />
+          <Route path="admin/users" element={<AdminUsersPage />} />
+          <Route path="admin/users/:id" element={<AdminUserDetailPage />} />
         </Route>
 
         {/* 公开页面 */}

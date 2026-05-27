@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -35,9 +36,12 @@ class EmbeddingService:
         self._device = device or self._settings.kb_embedding_device
         self._strategy = strategy or get_embedding_strategy(self._model_name)
         self._model: Any = None
-        self._executor = ThreadPoolExecutor(max_workers=1)
+        concurrency = max(1, self._settings.kb_embedding_concurrency)
+        self._executor = ThreadPoolExecutor(max_workers=concurrency)
         self._initialized = False
+        self._gpu = False
         self._init_lock = threading.Lock()
+        self._gpu_encode_lock = threading.Lock()  # GPU 推理互斥——防止多线程同时 encode 导致 OOM
 
     def _lazy_init(self) -> None:
         """同步初始化模型（首次调用阻塞，之后立即返回）。"""
@@ -51,14 +55,40 @@ class EmbeddingService:
                     import os
 
                     os.environ.setdefault("HF_ENDPOINT", self._settings.hf_endpoint)
+                import torch
+
+                torch.set_num_threads(4)
                 from sentence_transformers import SentenceTransformer
 
-                logger.info(f"加载 Embedding 模型: {self._model_name} (device={self._device})")
-                self._model = SentenceTransformer(
-                    self._model_name,
-                    device=self._device if self._device != "auto" else None,
-                    trust_remote_code=True,
-                )
+                # 设备选择：优先 GPU，显式 bfloat16 节省一半显存
+                if self._device == "cpu":
+                    self._gpu = False
+                elif torch.cuda.is_available():
+                    self._gpu = True
+                else:
+                    self._gpu = False
+
+                if self._gpu:
+                    logger.info(
+                        f"加载 Embedding 模型: {self._model_name} (GPU, bfloat16)"
+                    )
+                    self._model = SentenceTransformer(
+                        self._model_name,
+                        device="cuda",
+                        trust_remote_code=True,
+                        model_kwargs={"torch_dtype": torch.bfloat16},
+                    )
+                    torch.cuda.empty_cache()
+                else:
+                    logger.info(
+                        f"加载 Embedding 模型: {self._model_name} (CPU)"
+                    )
+                    self._model = SentenceTransformer(
+                        self._model_name,
+                        device="cpu",
+                        trust_remote_code=True,
+                    )
+
                 self._initialized = True
                 dim = (
                     self._model.get_embedding_dimension()
@@ -73,12 +103,23 @@ class EmbeddingService:
     async def embed_documents(
         self,
         texts: list[str],
-        batch_size: int = 32,
+        batch_size: int = 16,
         strategy: EmbeddingStrategy | None = None,
     ) -> list[list[float]]:
-        """批量文档向量化——走 document 侧格式化，优先从 Redis 缓存读取。"""
+        """批量文档向量化——走 document 侧格式化，优先从 Redis 缓存读取。
+
+        支持攒批：当 kb_embedding_batch_wait_ms > 0 时，合并短时间窗口内
+        的多次调用为一次 GPU 批处理，提升 GPU 利用率。
+        """
         active_strategy = strategy or self._strategy
         formatted = [active_strategy.format_document(t) for t in texts]
+
+        # 攒批模式：通过异步队列合并并发请求
+        batch_wait = self._settings.kb_embedding_batch_wait_ms
+        if batch_wait > 0 and len(formatted) <= 4:
+            return await self._embed_with_batching(
+                formatted, batch_size, active_strategy, batch_wait
+            )
 
         # 检查 Redis 缓存
         if self._settings.kb_embedding_cache_enabled and len(formatted) > 0:
@@ -159,20 +200,80 @@ class EmbeddingService:
         batch_size: int,
         extra_kwargs: dict[str, Any],
     ) -> list[list[float]]:
+        import torch
+
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(self._executor, self._lazy_init)
 
+        # GPU 上 batch 太大会 OOM（32条×768tokens 的 attention 矩阵 ~数 GB）
+        if self._gpu and batch_size > 4:
+            batch_size = 4
+
         def _run() -> list[list[float]]:
-            embeddings = self._model.encode(
-                texts,
-                batch_size=batch_size,
-                show_progress_bar=False,
-                normalize_embeddings=True,
-                **extra_kwargs,
-            )
-            return embeddings.tolist()
+            try:
+                if self._gpu:
+                    # GPU 推理互斥：多线程 CPU 预处理可并行，但 encode 调用必须串行
+                    with self._gpu_encode_lock:
+                        embeddings = self._model.encode(
+                            texts,
+                            batch_size=batch_size,
+                            show_progress_bar=False,
+                            normalize_embeddings=True,
+                            **extra_kwargs,
+                        )
+                else:
+                    embeddings = self._model.encode(
+                        texts,
+                        batch_size=batch_size,
+                        show_progress_bar=False,
+                        normalize_embeddings=True,
+                        **extra_kwargs,
+                    )
+                return embeddings.tolist()
+            except torch.cuda.OutOfMemoryError:
+                # GPU OOM 时回退到 CPU
+                logger.warning("GPU OOM，回退 CPU 编码")
+                self._model.to("cpu")
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
+                embeddings = self._model.encode(
+                    texts,
+                    batch_size=8,
+                    show_progress_bar=False,
+                    normalize_embeddings=True,
+                    **extra_kwargs,
+                )
+                result = embeddings.tolist()
+                self._model.to("cuda")
+                torch.cuda.empty_cache()
+                return result
+            finally:
+                if self._gpu:
+                    torch.cuda.empty_cache()
 
         return await loop.run_in_executor(self._executor, _run)
+
+    # ── 攒批 ────────────────────────────────────────────────
+
+    async def _embed_with_batching(
+        self,
+        texts: list[str],
+        batch_size: int,
+        strategy: EmbeddingStrategy,
+        wait_ms: int,
+    ) -> list[list[float]]:
+        """通过攒批器合并短窗口内的并发 embedding 请求。
+
+        工作方式：
+        1. 注册当前请求到模块级攒批器
+        2. 等待窗口后，攒批器合并所有请求为一次 encode 调用
+        3. 结果按原始顺序分发给各调用方
+        """
+        batch_key = self._model_name  # 按模型名隔离攒批
+        return await _get_embedding_batcher().submit(
+            batch_key, texts, batch_size, strategy, self, wait_ms,
+        )
 
     @property
     def model_name(self) -> str:
@@ -189,6 +290,127 @@ class EmbeddingService:
     def to_langchain(self) -> LangchainEmbeddingAdapter:
         """转换为 langchain 兼容的 Embeddings 接口。"""
         return LangchainEmbeddingAdapter(self)
+
+
+# ---- 攒批器 ----
+
+class EmbeddingBatcher:
+    """异步攒批器：合并短时间窗口内的 embedding 请求为一次批量编码。
+
+    使用 asyncio.Event 协调：第一个请求触发等待窗口，窗口关闭后
+    批量编码所有收集到的文本，结果按原始位置分发给各调用方。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        # batch_key → (futures, texts, activation_time)
+        self._pending: dict[
+            str,
+            tuple[list[asyncio.Future], list[str], float],
+        ] = {}
+        # batch_key → asyncio.Task (batch processing task)
+        self._tasks: dict[str, asyncio.Task] = {}
+
+    async def submit(
+        self,
+        batch_key: str,
+        texts: list[str],
+        batch_size: int,
+        strategy: EmbeddingStrategy,
+        service: Any,
+        wait_ms: int,
+    ) -> list[list[float]]:
+        """提交 embedding 请求，可能在窗口内与其他请求合并。"""
+        import asyncio as _asyncio
+
+        loop = _asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+
+        with self._lock:
+            if batch_key not in self._pending:
+                # 第一个请求：创建新的攒批窗口
+                self._pending[batch_key] = ([], [], time.time())
+
+                # 启动延迟任务
+                task = _asyncio.ensure_future(
+                    self._drain_after(batch_key, batch_size, strategy, service, wait_ms)
+                )
+                self._tasks[batch_key] = task
+
+            futures, all_texts, _ = self._pending[batch_key]
+            start_idx = len(all_texts)  # 记录当前文本的起始位置
+            futures.append(fut)
+            all_texts.extend(texts)
+
+        result = await fut
+        # 返回属于本次调用的结果切片
+        return result[start_idx : start_idx + len(texts)]
+
+    async def _drain_after(
+        self,
+        batch_key: str,
+        batch_size: int,
+        strategy: EmbeddingStrategy,
+        service: Any,
+        wait_ms: int,
+    ) -> None:
+        """等待窗口关闭后批量编码。"""
+        import asyncio as _asyncio
+
+        wait_sec = wait_ms / 1000.0
+        max_batch = get_settings().kb_embedding_batch_max
+
+        try:
+            await _asyncio.sleep(wait_sec)
+
+            with self._lock:
+                if batch_key not in self._pending:
+                    return
+                futures, all_texts, _ = self._pending.pop(batch_key)
+                self._tasks.pop(batch_key, None)
+
+            if not all_texts:
+                return
+
+            # 截断到最大攒批量
+            if len(all_texts) > max_batch:
+                logger.debug(
+                    f"Embedding 攒批截断: {len(all_texts)} → {max_batch}"
+                )
+                all_texts = all_texts[:max_batch]
+
+            # 批量编码
+            extra = strategy.encode_kwargs_for_document()
+            vectors = await service._encode(all_texts, batch_size, extra)  # noqa: SLF001
+
+            # 分发给各调用方
+            for i, f in enumerate(futures):
+                if not f.done():
+                    f.set_result(vectors)
+
+        except Exception as e:
+            logger.warning(f"Embedding 攒批失败: {e}")
+            # 失败时逐个设置为异常
+            with self._lock:
+                popped = self._pending.pop(batch_key, (None, None, None))
+                self._tasks.pop(batch_key, None)
+            if popped[0]:
+                for f in popped[0]:
+                    if not f.done():
+                        f.set_exception(e)
+
+
+_embedding_batcher: EmbeddingBatcher | None = None
+_batcher_lock = threading.Lock()
+
+
+def _get_embedding_batcher() -> EmbeddingBatcher:
+    global _embedding_batcher
+    if _embedding_batcher is None:
+        with _batcher_lock:
+            if _embedding_batcher is None:
+                _embedding_batcher = EmbeddingBatcher()
+    return _embedding_batcher
 
 
 # ---- 按模型名缓存 ----

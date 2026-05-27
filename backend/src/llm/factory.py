@@ -10,9 +10,9 @@ DeepSeek 兼容 OpenAI API 规范，使用 ChatOpenAI 客户端调用。
 from functools import lru_cache
 from typing import Any
 
+from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_anthropic import ChatAnthropic
 
 from src.core.config import Settings, get_settings
 from src.core.exceptions import LLMError

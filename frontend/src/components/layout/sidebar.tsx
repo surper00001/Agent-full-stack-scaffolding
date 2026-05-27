@@ -8,6 +8,7 @@ import {
   Building2,
   ChevronLeft,
   User,
+  Users,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 /** 管理员导航项 */
 const ADMIN_NAV_ITEMS = [
   { to: "/admin", icon: LayoutDashboard, label: "仪表盘" },
+  { to: "/admin/users", icon: Users, label: "用户管理" },
   { to: "/admin/agents", icon: Bot, label: "Agent管理" },
   { to: "/admin/conversations", icon: MessageSquare, label: "对话记录" },
   { to: "/admin/tenant", icon: Building2, label: "租户管理" },

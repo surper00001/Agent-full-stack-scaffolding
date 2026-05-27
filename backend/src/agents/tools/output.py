@@ -11,8 +11,6 @@ from loguru import logger
 
 from src.core.config import get_settings
 
-
-
 _OUTPUT_DIR = Path(get_settings().file_output_dir)
 _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 

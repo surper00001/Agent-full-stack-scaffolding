@@ -57,6 +57,8 @@ interface KBStore {
   fetchDocuments: (kbId: string, page?: number, pageSize?: number) => Promise<void>;
   uploadDocument: (kbId: string, file: File) => Promise<{ docId: string }>;
   deleteDocument: (kbId: string, docId: string) => Promise<void>;
+  cancelDocument: (kbId: string, docId: string) => Promise<void>;
+  retryDocument: (kbId: string, docId: string, filename: string) => Promise<void>;
   reprocessDocument: (kbId: string, docId: string, filename: string) => Promise<void>;
   pollProgress: (kbId: string, docId: string, filename: string) => Promise<void>;
   resumePollingForProcessing: (kbId: string) => void;
@@ -296,10 +298,47 @@ export const useKBStore = create<KBStore>((set, get) => ({
   deleteDocument: async (kbId, docId) => {
     try {
       await kbApi.deleteDocument(kbId, docId);
+      // 清除上传进度卡片
+      get().clearUploadProgress(docId);
       await get().fetchDocuments(kbId);
       await get().fetchKB(kbId);
     } catch (err) {
       set({ kbError: (err as Error).message });
+    }
+  },
+
+  cancelDocument: async (kbId, docId) => {
+    try {
+      const res = await kbApi.cancelDocument(kbId, docId);
+      if (res.data.cancelled) {
+        set((s) => {
+          const entry = s.uploadProgressMap[docId];
+          if (!entry) return s;
+          return {
+            uploadProgressMap: {
+              ...s.uploadProgressMap,
+              [docId]: { ...entry, stage: "cancelled", stageLabel: "已取消" },
+            },
+          };
+        });
+        // 稍后刷新文档列表
+        setTimeout(() => {
+          get().fetchDocuments(kbId);
+        }, 1500);
+      }
+    } catch (err) {
+      set({ kbError: (err as Error).message });
+    }
+  },
+
+  retryDocument: async (kbId, docId, filename) => {
+    try {
+      await kbApi.retryDocument(kbId, docId);
+      await get().pollProgress(kbId, docId, filename);
+      await get().fetchDocuments(kbId);
+    } catch (err) {
+      set({ kbError: (err as Error).message });
+      throw err;
     }
   },
 
@@ -353,7 +392,7 @@ export const useKBStore = create<KBStore>((set, get) => ({
           return;
         }
 
-        if (progress.stage === "error") {
+        if (progress.stage === "error" || progress.stage === "cancelled") {
           get().fetchDocuments(kbId);
           return;
         }

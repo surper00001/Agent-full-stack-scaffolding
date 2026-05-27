@@ -16,9 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import get_settings
 from src.core.exceptions import ForbiddenError, UnauthorizedError
 from src.core.security import decode_access_token
+from src.db.repository import BaseRepository
 from src.db.session import get_db_session
 from src.models.domain.user import User
-from src.db.repository import BaseRepository
 
 
 class CurrentUser(NamedTuple):
@@ -47,7 +47,7 @@ def get_current_tenant(
         return x_tenant_id
 
     # 默认
-    return get_settings().deafult_tenant_id
+    return get_settings().default_tenant_id
 
 
 async def get_current_user(

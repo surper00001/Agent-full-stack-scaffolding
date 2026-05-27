@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from src.services.document_processors.layout import LayoutTag
+
 if TYPE_CHECKING:
     from src.services.chunking_service import StructuredBlock
 
@@ -318,39 +320,537 @@ class TableUtilsMixin:
                 col_prose_ratios.append(0)
 
         # 若所有列（≥2列）的散文比都 >0.5 → 各列都是自然语言文本
-        if len(col_prose_ratios) >= 2 and all(p > 0.5 for p in col_prose_ratios):
-            return False
+        return not (len(col_prose_ratios) >= 2 and all(p > 0.5 for p in col_prose_ratios))
 
-        return True
+    # ── 重复内容去重（模板噪声） ──────────────────────────────
+
+    @classmethod
+    def _deduplicate_template_noise(
+        cls, blocks: list[StructuredBlock]
+    ) -> list[StructuredBlock]:
+        """检测并标记跨页重复出现的模板噪声。
+
+        算法：
+        1. 收集所有 text 块中的短句片段（10-250 字符）
+        2. 找出出现在 ≥3 个不同页面的重复片段
+        3. 将这些片段所在块标记为 TEMPLATE_NOISE
+        4. 从块内容中移除重复片段
+
+        典型场景：
+        - 每页相同的 "Confidential - Do Not Distribute" 水印
+        - 每页相同的版权声明行
+        - 模板中的固定警告语
+        """
+        if not blocks or len(blocks) < 3:
+            return blocks
+
+        # 阶段1: 收集候选片段（每块拆分为短句，并做归一化指纹）
+
+        # fingerprint → {page: [block_indices]}
+        fp_pages: dict[str, set[int]] = {}
+        fp_blocks: dict[str, list[int]] = {}  # fingerprint → [block_idx]
+        # block_idx → [(original_text, fingerprint)]
+        block_segments: dict[int, list[tuple[str, str]]] = {}
+
+        for idx, block in enumerate(blocks):
+            if block.block_type != "text":
+                continue
+            if block.layout_tag in ("header", "footer"):
+                continue
+
+            content = block.content
+            # 将文本拆分为短句（按句末标点或换行）
+            segments = re.split(r"[。！？\n]+", content)
+            for seg in segments:
+                seg = seg.strip()
+                if len(seg) < 10 or len(seg) > 250:
+                    continue
+                # 归一化指纹：去除空格和标点，转小写
+                fp = re.sub(r"\s+", "", seg).lower()
+                if len(fp) < 10:
+                    continue
+                fp_pages.setdefault(fp, set()).add(block.page_number)
+                fp_blocks.setdefault(fp, []).append(idx)
+                block_segments.setdefault(idx, []).append((seg, fp))
+
+        # 阶段2: 标记跨 ≥3 页重复的指纹
+        noise_fingerprints: set[str] = set()
+        for fp, pages in fp_pages.items():
+            if len(pages) >= 3:
+                noise_fingerprints.add(fp)
+
+        if not noise_fingerprints:
+            return blocks
+
+        # 阶段3: 移除噪声段并标记块
+        affected_blocks = 0
+        for idx, segments in block_segments.items():
+            block = blocks[idx]
+            noise_segments_in_block = [
+                orig for orig, fp in segments if fp in noise_fingerprints
+            ]
+            if not noise_segments_in_block:
+                continue
+
+            # 移除噪声段
+            cleaned = block.content
+            for ns in noise_segments_in_block:
+                cleaned = cleaned.replace(ns, "").strip()
+
+            # 清理多余空白
+            cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+            cleaned = re.sub(r"  +", " ", cleaned)
+
+            if len(cleaned) < 10:
+                # 整块都是噪声 → 标记但不删除（前端可能仍需显示页码信息）
+                block.layout_tag = LayoutTag.TEMPLATE_NOISE.value
+            elif len(cleaned) < len(block.content) * 0.6:
+                # 噪声占比 >40% → 整块标记
+                block.layout_tag = LayoutTag.TEMPLATE_NOISE.value
+            # 否则只清理内容，保留原标签
+
+            # 更新 content（使用纯 str 赋值，保持与 StructuredBlock 兼容）
+            object.__setattr__(block, "content", cleaned)
+            affected_blocks += 1
+
+        if affected_blocks:
+            logger.info(
+                f"模板噪声去重: {len(noise_fingerprints)} 种噪声模式, "
+                f"影响 {affected_blocks} 个块"
+            )
+
+        return blocks
+
+    # ── 多级表头识别 ────────────────────────────────────────
+
+    @classmethod
+    def _detect_multi_level_headers(
+        cls,
+        table_data: list[list[str]],
+        colspans: list[list[int]] | None = None,
+    ) -> tuple[int, dict[int, list[int]]]:
+        """检测多级表头层级，返回 (header_row_count, header_tree)。
+
+        多级表头示例：
+          |    2024年度    |    2025年度    |  ← row 0 (level-0 parent headers)
+          |  Q1  |  Q2  |  Q3  |  Q4  |   ← row 1 (level-1 child headers)
+          | 100  | 200  | 150  | 180  |   ← data rows
+
+        检测规则：
+        1. 连续的表头行（每行所有列都是短标签 < 30 字符）
+        2. 上层行非空单元格数 < 下层行 → 存在层级关系
+        3. 利用 colspan 确定父子映射
+
+        Returns:
+            header_row_count: 表头行数（0 = 无表头，1 = 单级，2+ = 多级）
+            header_tree: {parent_col_idx: [child_col_indices]} 或空 dict
+        """
+        if not table_data or len(table_data) < 3:
+            return min(1, len(table_data)), {}
+
+        rows = len(table_data)
+
+        # 检测连续表头行：使用区分性更强的启发式
+        _has_text = re.compile(r"[A-Za-z一-鿿]")
+        _is_numeric = re.compile(r"^[\d.,+\-±%￥$€£\s]+$")
+        header_rows = 0
+        for ri in range(min(5, rows)):
+            row = table_data[ri]
+            cells = [str(c).strip() for c in row if c and str(c).strip()]
+            if not cells:
+                break
+
+            # 排除条件1：含句末标点 → 不是表头
+            has_sentence_end = any(re.search(r"[。！？.!?]", c) for c in cells)
+            if has_sentence_end:
+                break
+
+            # 排除条件2：高比例纯数字 → 数据行
+            numeric_ratio = sum(1 for c in cells if _is_numeric.match(c)) / len(cells)
+            if numeric_ratio > 0.3:
+                break
+
+            # 排除条件3：超长单元格 → 数据行
+            if any(len(c) > 60 for c in cells):
+                break
+
+            # 表头确认：至少 40% 单元格含文字字符
+            text_ratio = sum(1 for c in cells if _has_text.search(c)) / len(cells)
+            if text_ratio >= 0.4:
+                header_rows += 1
+            else:
+                break
+
+        if header_rows < 2:
+            return max(1, header_rows), {}
+
+        # 构建层级树：上层每列 → 下层对应子列
+        header_tree: dict[int, list[int]] = {}
+
+        for parent_ri in range(header_rows - 1):
+            child_ri = parent_ri + 1
+            parent_row = table_data[parent_ri]
+            child_row = table_data[child_ri]
+
+            parent_cols = len(parent_row)
+            child_cols = len(child_row)
+
+            # 使用 colspan 信息（如果有）确定父子关系
+            child_idx = 0
+            for pi in range(parent_cols):
+                cs = 1
+                if colspans and parent_ri < len(colspans) and pi < len(colspans[parent_ri]):
+                    cs = colspans[parent_ri][pi]
+                if cs == 0:
+                    continue
+
+                children = list(range(child_idx, min(child_idx + cs, child_cols)))
+                if children:
+                    header_tree[pi] = children
+                child_idx += cs
+
+        return header_rows, header_tree
+
+    @classmethod
+    def _build_table_html_with_headers(
+        cls,
+        table_data: list[list[str]],
+        colspans: list[list[int]] | None = None,
+        rowspans: list[list[int]] | None = None,
+        header_rows: int = 1,
+    ) -> str:
+        """构建带多级表头标记的 HTML 表格。
+
+        header_rows > 1 时，前 header_rows 行均使用 <th>，
+        并添加 data-header-level 属性标记层级，便于前端渲染。
+        """
+        if not table_data:
+            return '<div class="kb-table-wrapper"><table class="kb-table"></table></div>'
+
+        nrows = len(table_data)
+        ncols = max((len(r) for r in table_data), default=0)
+        parts = ['<div class="kb-table-wrapper"><table class="kb-table">']
+
+        # thead: 多级表头行
+        if header_rows > 0:
+            parts.append("<thead>")
+            for i in range(min(header_rows, nrows)):
+                row = table_data[i]
+                header_level = header_rows - i - 1  # 0 = 最底层表头, N-1 = 最顶层
+                cells_parts: list[str] = []
+                for j in range(ncols):
+                    if colspans and i < len(colspans) and j < len(colspans[i]) and colspans[i][j] == 0:
+                        continue
+                    if rowspans and i < len(rowspans) and j < len(rowspans[i]) and rowspans[i][j] == 0:
+                        continue
+                    attrs = f' data-header-level="{header_level}"'
+                    if colspans and i < len(colspans) and j < len(colspans[i]) and colspans[i][j] > 1:
+                        attrs += f' colspan="{colspans[i][j]}"'
+                    if rowspans and i < len(rowspans) and j < len(rowspans[i]) and rowspans[i][j] > 1:
+                        attrs += f' rowspan="{rowspans[i][j]}"'
+                    content = str(row[j]).strip() if j < len(row) and row[j] else ""
+                    cells_parts.append(f"<th{attrs}>{content}</th>")
+                parts.append(f"<tr>{''.join(cells_parts)}</tr>")
+            parts.append("</thead>")
+
+        # tbody: 数据行
+        if nrows > header_rows:
+            parts.append("<tbody>")
+            for i in range(header_rows, nrows):
+                row = table_data[i]
+                cells_parts: list[str] = []
+                for j in range(ncols):
+                    if colspans and i < len(colspans) and j < len(colspans[i]) and colspans[i][j] == 0:
+                        continue
+                    if rowspans and i < len(rowspans) and j < len(rowspans[i]) and rowspans[i][j] == 0:
+                        continue
+                    attrs = ""
+                    if colspans and i < len(colspans) and j < len(colspans[i]) and colspans[i][j] > 1:
+                        attrs += f' colspan="{colspans[i][j]}"'
+                    if rowspans and i < len(rowspans) and j < len(rowspans[i]) and rowspans[i][j] > 1:
+                        attrs += f' rowspan="{rowspans[i][j]}"'
+                    content = str(row[j]).strip() if j < len(row) and row[j] else ""
+                    cells_parts.append(f"<td{attrs}>{content}</td>")
+                parts.append(f"<tr>{''.join(cells_parts)}</tr>")
+            parts.append("</tbody>")
+
+        parts.append("</table></div>")
+        return "\n".join(parts)
+
+    # ── 合并单元格检测 ──────────────────────────────────────
+
+    @classmethod
+    def _detect_merged_cells(
+        cls,
+        table_data: list[list[str]],
+        cell_bboxes: list[list[tuple[float, float, float, float] | None]] | None = None,
+        col_x_boundaries: list[float] | None = None,
+        row_y_boundaries: list[float] | None = None,
+    ) -> tuple[list[list[int]], list[list[int]]]:
+        """检测表格中的合并单元格，返回 (colspans, rowspans) 矩阵。
+
+        当提供 cell_bboxes（来自 pdfplumber Table.cells）时使用精确几何检测；
+        否则回退到基于内容的启发式检测。
+        """
+        if not table_data:
+            return [], []
+
+        rows = len(table_data)
+        cols = max((len(r) for r in table_data), default=0)
+
+        if cell_bboxes and col_x_boundaries and row_y_boundaries:
+            return cls._detect_merged_from_geometry(
+                table_data, cell_bboxes, col_x_boundaries, row_y_boundaries
+            )
+        return cls._detect_merged_from_content(table_data, rows, cols)
+
+    @classmethod
+    def _detect_merged_from_geometry(
+        cls,
+        table_data: list[list[str]],
+        cell_bboxes: list[list[tuple[float, float, float, float] | None]],
+        col_x_boundaries: list[float],
+        row_y_boundaries: list[float],
+    ) -> tuple[list[list[int]], list[list[int]]]:
+        """通过单元格外接框精确检测合并单元格。
+
+        算法：对每个非空单元格，计算其 bbox 右/下边界跨越了几列几行。
+        被合并覆盖的单元格标记为 span=0（前端跳过渲染）。
+        """
+        rows = len(table_data)
+        cols = max((len(r) for r in table_data), default=0)
+        colspans = [[1] * cols for _ in range(rows)]
+        rowspans = [[1] * cols for _ in range(rows)]
+
+        for ri in range(min(rows, len(cell_bboxes))):
+            row_cells = cell_bboxes[ri]
+            for ci in range(min(cols, len(row_cells))):
+                bbox = row_cells[ci]
+                if bbox is None:
+                    continue
+
+                x0, _y0, x1, y1 = bbox
+
+                # 检测 colspan：右边界跨越了几个列分隔线
+                end_col = ci
+                for c in range(ci + 1, len(col_x_boundaries)):
+                    if x1 <= col_x_boundaries[c] + 2:  # 2pt 容差
+                        break
+                    end_col = c
+                cs = end_col - ci + 1
+                if cs > 1:
+                    colspans[ri][ci] = cs
+                    for s in range(1, cs):
+                        if ci + s < cols:
+                            colspans[ri][ci + s] = 0
+
+                # 检测 rowspan：下边界跨越了几个行分隔线
+                end_row = ri
+                for r in range(ri + 1, len(row_y_boundaries)):
+                    if y1 <= row_y_boundaries[r] + 2:
+                        break
+                    end_row = r
+                rs = end_row - ri + 1
+                if rs > 1:
+                    rowspans[ri][ci] = rs
+                    for s in range(1, rs):
+                        if ri + s < rows:
+                            rowspans[ri + s][ci] = 0
+
+        return colspans, rowspans
+
+    @classmethod
+    def _detect_merged_from_content(
+        cls, table_data: list[list[str]], rows: int, cols: int
+    ) -> tuple[list[list[int]], list[list[int]]]:
+        """基于内容模式启发式检测合并单元格（无几何信息时的回退方案）。
+
+        规则：
+        - colspan: 非空单元格右侧连续空单元格（且这些空单元格下方有内容→确认是独立列）
+        - rowspan: 非空单元格下方连续空单元格（且这些行有其他列的内容→确认是独立行）
+        """
+        colspans = [[1] * cols for _ in range(rows)]
+        rowspans = [[1] * cols for _ in range(rows)]
+
+        # 归一化补齐不等宽行
+        norm: list[list[str]] = []
+        for row in table_data:
+            padded = list(row) + [""] * (cols - len(row))
+            norm.append([str(c).strip() if c else "" for c in padded])
+
+        # ── Colspan ──
+        for ri in range(rows):
+            ci = 0
+            while ci < cols:
+                if not norm[ri][ci]:
+                    ci += 1
+                    continue
+                span = 1
+                for next_ci in range(ci + 1, cols):
+                    if norm[ri][next_ci]:
+                        break
+                    below_has = any(norm[r][next_ci] for r in range(ri + 1, rows))
+                    if below_has:
+                        span += 1
+                    else:
+                        break
+                if span > 1:
+                    colspans[ri][ci] = span
+                    for s in range(1, span):
+                        if ci + s < cols:
+                            colspans[ri][ci + s] = 0
+                ci += span
+
+        # ── Rowspan ──
+        for ci in range(cols):
+            ri = 0
+            while ri < rows:
+                if colspans[ri][ci] == 0:
+                    ri += 1
+                    continue
+                if not norm[ri][ci]:
+                    ri += 1
+                    continue
+                span = 1
+                for next_ri in range(ri + 1, rows):
+                    if norm[next_ri][ci]:
+                        break
+                    row_has = any(norm[next_ri][c] for c in range(cols) if c != ci)
+                    if row_has:
+                        span += 1
+                    else:
+                        break
+                if span > 1:
+                    rowspans[ri][ci] = span
+                    for s in range(1, span):
+                        if ri + s < rows:
+                            rowspans[ri + s][ci] = 0
+                ri += span
+
+        return colspans, rowspans
+
+    @classmethod
+    def _pdfplumber_table_cell_info(
+        cls, table_obj: object
+    ) -> tuple[
+        list[list[tuple[float, float, float, float] | None]],
+        list[float],
+        list[float],
+    ]:
+        """从 pdfplumber Table 对象提取单元格坐标网格。
+
+        Returns:
+            (cell_bboxes, col_x_boundaries, row_y_boundaries)
+        """
+        cell_bboxes: list[list[tuple[float, float, float, float] | None]] = []
+        col_boundaries_set: set[float] = set()
+        row_boundaries_set: set[float] = set()
+
+        try:
+            for row_cells in table_obj.cells:
+                row_bboxes: list[tuple[float, float, float, float] | None] = []
+                for cell in row_cells:
+                    if cell is not None:
+                        bbox = (cell[0], cell[1], cell[2], cell[3])
+                        row_bboxes.append(bbox)
+                        col_boundaries_set.add(cell[0])
+                        col_boundaries_set.add(cell[2])
+                        row_boundaries_set.add(cell[1])
+                        row_boundaries_set.add(cell[3])
+                    else:
+                        row_bboxes.append(None)
+                if row_bboxes:
+                    cell_bboxes.append(row_bboxes)
+        except Exception:
+            return [], [], []
+
+        return (
+            cell_bboxes,
+            sorted(col_boundaries_set),
+            sorted(row_boundaries_set),
+        )
 
     @staticmethod
-    def _table_to_markdown(table_data: list[list[str]]) -> str:
+    def _table_to_markdown(
+        table_data: list[list[str]],
+        colspans: list[list[int]] | None = None,
+        rowspans: list[list[int]] | None = None,
+    ) -> str:
+        """二维列表 → Markdown 表格，合并单元格内容在覆盖区域重复填充（提升检索召回）。"""
         if not table_data:
             return ""
-        rows = []
+        nrows = len(table_data)
+        ncols = max((len(r) for r in table_data), default=0)
+
+        # 构建填充矩阵：合并单元格的内容复制到被覆盖的格子
+        filled: list[list[str]] = []
         for i, row in enumerate(table_data):
-            cleaned = [
-                str(cell).replace("\n", " ").replace("|", "\\|").strip() if cell else ""
-                for cell in row
-            ]
-            rows.append("| " + " | ".join(cleaned) + " |")
-            if i == 0 and len(table_data) > 1:
-                rows.append("| " + " | ".join(["---"] * len(cleaned)) + " |")
+            filled_row: list[str] = []
+            for j in range(ncols):
+                cell = str(row[j]).replace("\n", " ").replace("|", "\\|").strip() if j < len(row) and row[j] else ""
+                # 如果该单元格被左侧合并覆盖(colspan=0)或被上方合并覆盖(rowspan=0)，从源头复制内容
+                if colspans and i < len(colspans) and j < len(colspans[i]) and colspans[i][j] == 0:
+                    # 向左查找源头
+                    for sj in range(j - 1, -1, -1):
+                        if colspans[i][sj] > 0 and sj + colspans[i][sj] > j:
+                            src_val = str(table_data[i][sj]).replace("\n", " ").replace("|", "\\|").strip() if i < len(table_data) and sj < len(table_data[i]) and table_data[i][sj] else ""
+                            cell = src_val
+                            break
+                if rowspans and i < len(rowspans) and j < len(rowspans[i]) and rowspans[i][j] == 0:
+                    # 向上查找源头
+                    for si in range(i - 1, -1, -1):
+                        if si < len(rowspans) and j < len(rowspans[si]) and rowspans[si][j] > 0 and si + rowspans[si][j] > i:
+                            src_val = str(table_data[si][j]).replace("\n", " ").replace("|", "\\|").strip() if si < len(table_data) and j < len(table_data[si]) and table_data[si][j] else ""
+                            cell = src_val
+                            break
+                if not cell:
+                    cell = ""
+                filled_row.append(cell)
+            filled.append(filled_row)
+
+        rows = []
+        for i, row in enumerate(filled):
+            rows.append("| " + " | ".join(row) + " |")
+            if i == 0 and len(filled) > 1:
+                rows.append("| " + " | ".join(["---"] * len(row)) + " |")
         return "\n".join(rows)
 
 
     @staticmethod
-    def _table_to_html(table_data: list[list[str]]) -> str:
+    def _table_to_html(
+        table_data: list[list[str]],
+        colspans: list[list[int]] | None = None,
+        rowspans: list[list[int]] | None = None,
+    ) -> str:
+        """将表格数据转为 HTML，可选支持合并单元格。
+
+        colspans: 与 table_data 同形的二维列表，每格为 colspan 值（默认 1）
+        rowspans: 与 table_data 同形的二维列表，每格为 rowspan 值（默认 1）
+        """
         if not table_data:
             return '<div class="kb-table-wrapper"><table class="kb-table"></table></div>'
         parts = ['<div class="kb-table-wrapper"><table class="kb-table">']
         for i, row in enumerate(table_data):
             tag = "th" if i == 0 else "td"
-            cells = "".join(
-                f"<{tag}>{str(cell).strip() if cell else ''}</{tag}>"
-                for cell in row
-            )
-            parts.append(f"<tr>{cells}</tr>")
+            cells_parts: list[str] = []
+            for j, cell in enumerate(row):
+                # 跳过被合并覆盖的单元格（colspan=0 或 rowspan=0）
+                if colspans and i < len(colspans) and j < len(colspans[i]) and colspans[i][j] == 0:
+                    continue
+                if rowspans and i < len(rowspans) and j < len(rowspans[i]) and rowspans[i][j] == 0:
+                    continue
+                attrs = ""
+                if colspans and i < len(colspans) and j < len(colspans[i]):
+                    cs = colspans[i][j]
+                    if cs > 1:
+                        attrs += f' colspan="{cs}"'
+                if rowspans and i < len(rowspans) and j < len(rowspans[i]):
+                    rs = rowspans[i][j]
+                    if rs > 1:
+                        attrs += f' rowspan="{rs}"'
+                content = str(cell).strip() if cell else ""
+                cells_parts.append(f"<{tag}{attrs}>{content}</{tag}>")
+            parts.append(f"<tr>{''.join(cells_parts)}</tr>")
         parts.append("</table></div>")
         return "\n".join(parts)
 

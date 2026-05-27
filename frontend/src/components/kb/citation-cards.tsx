@@ -13,10 +13,16 @@ export interface KBCitation {
   section_title?: string;
   chunk_type?: string;
   document_id?: string;
+  // 表格字段
+  table_html?: string;
+  table_caption?: string;
+  // 图片字段
   image_url?: string;
   image_description?: string;
   image_caption?: string;
   ocr_status?: string;
+  image_width?: number | null;
+  image_height?: number | null;
 }
 
 interface CitationCardsProps {
@@ -385,11 +391,15 @@ export function parseCitationsFromArray(raw: unknown): KBCitation[] {
       section_title: typeof r.section_title === "string" ? r.section_title : undefined,
       document_id: typeof r.document_id === "string" ? r.document_id : undefined,
       chunk_type: typeof r.chunk_type === "string" ? r.chunk_type : undefined,
+      table_html: typeof r.table_html === "string" ? r.table_html : undefined,
+      table_caption: typeof r.table_caption === "string" ? r.table_caption : undefined,
       image_url: typeof r.image_url === "string" ? r.image_url : undefined,
       image_description:
         typeof r.image_description === "string" ? r.image_description : undefined,
       image_caption: typeof r.image_caption === "string" ? r.image_caption : undefined,
       ocr_status: typeof r.ocr_status === "string" ? r.ocr_status : undefined,
+      image_width: typeof r.image_width === "number" ? r.image_width : null,
+      image_height: typeof r.image_height === "number" ? r.image_height : null,
     }));
 }
 
@@ -424,10 +434,14 @@ export function parseKBCitations(toolResult: string): KBCitation[] {
       section_title: r.section_title,
       chunk_type: r.chunk_type,
       document_id: r.document_id,
+      table_html: typeof r.table_html === "string" ? r.table_html : undefined,
+      table_caption: typeof r.table_caption === "string" ? r.table_caption : undefined,
       image_url: r.image_url,
       image_description: r.image_description,
       image_caption: r.image_caption,
       ocr_status: r.ocr_status,
+      image_width: typeof r.image_width === "number" ? r.image_width : null,
+      image_height: typeof r.image_height === "number" ? r.image_height : null,
     }));
   } catch {
     return [];

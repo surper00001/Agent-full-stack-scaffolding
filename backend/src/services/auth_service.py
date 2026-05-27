@@ -2,10 +2,9 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pyotp
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import pyotp
 
 from src.core.config import get_settings
 from src.core.exceptions import (
@@ -20,6 +19,7 @@ from src.core.security import (
     decode_access_token,
     generate_refresh_token,
     hash_password,
+    hash_refresh_token,
     verify_password,
 )
 from src.db.repository import BaseRepository
@@ -46,7 +46,7 @@ class AuthService:
         code = totp.now().zfill(6)
 
         redis = await get_redis()
-        key = f"verify_code:{method}:{target}"
+        key = f"verify_code:{target}"
         await redis.setex(key, settings.verification_code_ttl, secret)
 
         return code
@@ -156,7 +156,7 @@ class AuthService:
 
     async def refresh_access_token(self, raw_refresh_token: str) -> dict:
         """使用 Refresh Token 刷新 Access Token（轮换制：旧 Token 失效，发新 Token）。"""
-        token_hash = hash_password(raw_refresh_token)
+        token_hash = hash_refresh_token(raw_refresh_token)
 
         # 查找匹配的 RefreshToken
         stmt = select(RefreshToken).where(
@@ -185,7 +185,7 @@ class AuthService:
 
     async def logout(self, raw_refresh_token: str) -> None:
         """登出：撤销 Refresh Token。"""
-        token_hash = hash_password(raw_refresh_token)
+        token_hash = hash_refresh_token(raw_refresh_token)
 
         stmt = select(RefreshToken).where(
             RefreshToken.token_hash == token_hash,

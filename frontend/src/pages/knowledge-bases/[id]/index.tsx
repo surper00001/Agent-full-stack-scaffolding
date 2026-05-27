@@ -22,6 +22,8 @@ export default function KnowledgeBaseDetailPage() {
     fetchDocuments,
     uploadDocument,
     deleteDocument,
+    cancelDocument,
+    retryDocument,
     reprocessDocument,
     searchResult,
     searchLoading,
@@ -72,6 +74,21 @@ export default function KnowledgeBaseDetailPage() {
   const handleDelete = async (docId: string, filename: string) => {
     if (!confirm(`确定删除「${filename}」？`)) return;
     await deleteDocument(kbId, docId);
+  };
+
+  const handleCancel = useCallback(
+    (docId: string) => {
+      cancelDocument(kbId, docId);
+    },
+    [kbId, cancelDocument],
+  );
+
+  const handleRetry = async (docId: string, filename: string) => {
+    try {
+      await retryDocument(kbId, docId, filename);
+    } catch {
+      // kbError 已写入 store
+    }
   };
 
   const handleReprocess = async (docId: string, filename: string) => {
@@ -130,7 +147,9 @@ export default function KnowledgeBaseDetailPage() {
           kbId={kbId}
           fileInputRef={fileInputRef}
           onUpload={handleUpload}
+          onCancel={handleCancel}
           onDelete={handleDelete}
+          onRetry={handleRetry}
           onReprocess={handleReprocess}
           onRefresh={() => {
             fetchDocuments(kbId, 1, 50);

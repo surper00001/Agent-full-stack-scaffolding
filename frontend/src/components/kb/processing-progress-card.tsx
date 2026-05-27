@@ -1,4 +1,4 @@
-import { Upload, Search, FileText, RefreshCw, type LucideIcon } from "lucide-react";
+import { Upload, Search, FileText, RefreshCw, XCircle, Trash2, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { UploadProgress } from "@/stores/knowledge-base-store";
@@ -39,21 +39,29 @@ function formatETA(seconds: number): string {
 
 interface ProcessingProgressCardProps {
   progress: UploadProgress;
+  onCancel?: () => void;
+  onDelete?: () => void;
+  onRetry?: () => void;
   onReprocess?: () => void;
 }
 
-export function ProcessingProgressCard({ progress, onReprocess }: ProcessingProgressCardProps) {
+export function ProcessingProgressCard({
+  progress, onCancel, onDelete, onRetry, onReprocess,
+}: ProcessingProgressCardProps) {
   const { stage, stageLabel, percentage, estimatedSeconds, errorMessage, filename } = progress;
   const isError = stage === "error";
   const isReady = stage === "ready";
-  const isActive = !isError && !isReady;
+  const isCancelled = stage === "cancelled";
+  const isActive = !isError && !isReady && !isCancelled;
   const Icon = STAGE_ICONS[stage] || RefreshCw;
 
   const borderClass = isError
     ? "border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20"
     : isReady
       ? "border-green-300 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20"
-      : "border-blue-300 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20";
+      : isCancelled
+        ? "border-yellow-300 dark:border-yellow-800 bg-yellow-50/50 dark:bg-yellow-950/20"
+        : "border-blue-300 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20";
 
   return (
     <Card className={`border-2 ${borderClass}`}>
@@ -63,25 +71,29 @@ export function ProcessingProgressCard({ progress, onReprocess }: ProcessingProg
             className={`h-5 w-5 shrink-0 ${
               isError
                 ? "text-red-500"
-                : isReady
-                  ? "text-green-500"
-                  : isActive
-                    ? "text-blue-500 animate-pulse"
-                    : "text-muted-foreground"
+                : isCancelled
+                  ? "text-yellow-500"
+                  : isReady
+                    ? "text-green-500"
+                    : isActive
+                      ? "text-blue-500 animate-pulse"
+                      : "text-muted-foreground"
             }`}
           />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium truncate">
-              {isReady ? "✓ " : isError ? "✗ " : ""}
+              {isReady ? "✓ " : isError ? "✗ " : isCancelled ? "⊘ " : ""}
               {filename}
             </p>
             <p
               className={`text-xs ${
                 isError
                   ? "text-red-600 dark:text-red-400"
-                  : isReady
-                    ? "text-green-600 dark:text-green-400"
-                    : "text-blue-600 dark:text-blue-400"
+                  : isCancelled
+                    ? "text-yellow-600 dark:text-yellow-400"
+                    : isReady
+                      ? "text-green-600 dark:text-green-400"
+                      : "text-blue-600 dark:text-blue-400"
               }`}
             >
               {stageLabel}
@@ -89,7 +101,7 @@ export function ProcessingProgressCard({ progress, onReprocess }: ProcessingProg
           </div>
           <span
             className={`text-sm font-mono font-bold tabular-nums shrink-0 ${
-              isError ? "text-red-500" : isReady ? "text-green-500" : "text-blue-500"
+              isError ? "text-red-500" : isCancelled ? "text-yellow-500" : isReady ? "text-green-500" : "text-blue-500"
             }`}
           >
             {percentage.toFixed(0)}%
@@ -99,7 +111,7 @@ export function ProcessingProgressCard({ progress, onReprocess }: ProcessingProg
         <div className="relative h-2 bg-muted rounded-full overflow-hidden">
           <div
             className={`absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-out ${
-              isError ? "bg-red-500" : isReady ? "bg-green-500" : "bg-blue-500"
+              isError ? "bg-red-500" : isCancelled ? "bg-yellow-500" : isReady ? "bg-green-500" : "bg-blue-500"
             }`}
             style={{ width: `${Math.min(percentage, 100)}%` }}
           />
@@ -116,6 +128,7 @@ export function ProcessingProgressCard({ progress, onReprocess }: ProcessingProg
             const itemIdx = STAGE_ORDER.indexOf(s.key);
             let dotClass = "bg-muted-foreground/20";
             if (isError) dotClass = "bg-red-300";
+            else if (isCancelled) dotClass = "bg-yellow-300";
             else if (isReady) dotClass = "bg-green-500";
             else if (itemIdx < currentIdx) dotClass = "bg-blue-500";
             else if (itemIdx === currentIdx) dotClass = "bg-blue-500 animate-pulse";
@@ -125,7 +138,7 @@ export function ProcessingProgressCard({ progress, onReprocess }: ProcessingProg
                 <div className={`h-2.5 w-2.5 rounded-full ${dotClass}`} />
                 <span
                   className={`text-[10px] ${
-                    itemIdx <= currentIdx ? "text-foreground" : "text-muted-foreground/40"
+                    itemIdx <= currentIdx && !isCancelled ? "text-foreground" : "text-muted-foreground/40"
                   }`}
                 >
                   {s.label}
@@ -146,11 +159,58 @@ export function ProcessingProgressCard({ progress, onReprocess }: ProcessingProg
           </p>
         )}
 
-        {isError && onReprocess && (
-          <Button variant="outline" size="sm" className="w-full" onClick={onReprocess}>
-            <RefreshCw className="mr-1 h-3.5 w-3.5" />
-            重新处理
-          </Button>
+        {/* 活跃阶段：取消 + 删除按钮 */}
+        {isActive && (
+          <div className="flex gap-2">
+            {onCancel && (
+              <Button variant="outline" size="sm" className="flex-1" onClick={onCancel}>
+                <XCircle className="mr-1 h-3.5 w-3.5" />
+                取消
+              </Button>
+            )}
+            {onDelete && (
+              <Button variant="outline" size="sm" className="flex-1" onClick={onDelete}>
+                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                删除
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* 已取消：重试 + 删除按钮 */}
+        {isCancelled && (
+          <div className="flex gap-2">
+            {onRetry && (
+              <Button variant="outline" size="sm" className="flex-1" onClick={onRetry}>
+                <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                重试
+              </Button>
+            )}
+            {onDelete && (
+              <Button variant="outline" size="sm" className="flex-1" onClick={onDelete}>
+                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                删除
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* 失败：重试 + 删除按钮（替代原来的只看 reprocess） */}
+        {isError && (
+          <div className="flex gap-2">
+            {(onRetry || onReprocess) && (
+              <Button variant="outline" size="sm" className="flex-1" onClick={onRetry || onReprocess}>
+                <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                重新处理
+              </Button>
+            )}
+            {onDelete && (
+              <Button variant="outline" size="sm" className="flex-1" onClick={onDelete}>
+                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                删除
+              </Button>
+            )}
+          </div>
         )}
 
         {progress.parsedPages != null && progress.totalPages != null && progress.totalPages > 0 && isActive && (
