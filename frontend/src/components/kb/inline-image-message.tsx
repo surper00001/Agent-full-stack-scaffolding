@@ -3,6 +3,7 @@
  */
 import { type ReactNode } from "react";
 import { Table, FileCode } from "lucide-react";
+import DOMPurify from "dompurify";
 import { AuthenticatedImage } from "./authenticated-image";
 import type { KBCitation } from "./citation-cards";
 
@@ -70,10 +71,12 @@ function InlineTable({ cite, citeNum }: { cite: KBCitation; citeNum: number }) {
         <div
           className="overflow-x-auto rounded-md border bg-background/80 text-xs"
           dangerouslySetInnerHTML={{
-            __html: cite.table_html
-              .replace(/<table/g, '<table class="w-full border-collapse"')
-              .replace(/<td/g, '<td class="border px-2 py-1"')
-              .replace(/<th/g, '<th class="border px-2 py-1 bg-muted/50 font-medium"'),
+            __html: DOMPurify.sanitize(
+              cite.table_html
+                .replace(/<table/g, '<table class="w-full border-collapse"')
+                .replace(/<td/g, '<td class="border px-2 py-1"')
+                .replace(/<th/g, '<th class="border px-2 py-1 bg-muted/50 font-medium"'),
+            ),
           }}
         />
         {cite.table_caption && (
@@ -102,7 +105,8 @@ function InlineTable({ cite, citeNum }: { cite: KBCitation; citeNum: number }) {
     );
 
   if (rows.length < 2) return null;
-  const [header, sep, ...data] = rows;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [header, _sep, ...data] = rows;
 
   return (
     <div className="my-3 space-y-1">

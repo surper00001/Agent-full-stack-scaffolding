@@ -61,6 +61,7 @@ async def async_client() -> AsyncGenerator[AsyncClient, None]:
         id="00000000-0000-0000-0000-000000000001",
         username="test_user",
         role="admin",
+        tenant_id="default",
     )
     app.dependency_overrides[api_deps.get_current_user] = lambda: mock_user
     app.dependency_overrides[api_deps.require_admin] = lambda: mock_user

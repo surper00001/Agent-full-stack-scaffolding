@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from loguru import logger
 
 from src.api.v1 import admin as admin_stats
-from src.api.v1 import agents, auth, conversations, health, knowledge_base, tenant, users
+from src.api.v1 import agents, auth, conversations, health, knowledge_base, skills, tenant, users
 from src.core.config import get_settings
 
 # 创建 v1 版本路由
@@ -24,6 +24,7 @@ api_v1_router.include_router(tenant.router)
 api_v1_router.include_router(admin_stats.router)
 api_v1_router.include_router(users.router)
 api_v1_router.include_router(knowledge_base.router)
+api_v1_router.include_router(skills.router)
 
 # 文件下载路由（Agent 生成文件）
 # 思维导图导出文件（子目录）

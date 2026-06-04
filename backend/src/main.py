@@ -34,6 +34,8 @@ from src.core.config import get_settings
 from src.core.exceptions import AppException
 from src.middleware.cors import setup_cors
 from src.middleware.logging import RequestLoggingMiddleware
+from src.middleware.rate_limit import RateLimitMiddleware
+from src.middleware.security_headers import SecurityHeadersMiddleware
 from src.middleware.tenant import TenantMiddleware
 from src.models.schemas.response import ErrorResponse
 from src.monitoring.tracer import setup_monitoring
@@ -52,6 +54,17 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     setup_logging()
     setup_monitoring()
+
+    from loguru import logger
+
+    # Harness 工具注册表 — 注册所有内置系统工具（文件/Shell/网络）
+    try:
+        from src.harness.tool_registry import register_builtin_tools
+
+        n = register_builtin_tools()
+        logger.info(f"   Harness 工具已注册: {n} 个内置工具")
+    except Exception as e:
+        logger.warning(f"   Harness 工具注册跳过: {e}")
 
     # HuggingFace 镜像与 Token（Embedding/Reranker 模型下载）
     if settings.hf_endpoint:
@@ -84,9 +97,6 @@ async def lifespan(app: FastAPI):
             _gpu_available = False
     except Exception:
         _gpu_available = False
-
-    from loguru import logger
-
     logger.info(f"[启动] {settings.app_name} v0.1.0 启动中...")
     logger.info(f"   环境: {settings.app_env}")
     logger.info(f"   Python: {__import__('sys').executable}")
@@ -104,6 +114,7 @@ async def lifespan(app: FastAPI):
         try:
             # 确保所有模型被导入以注册到 Base.metadata
             import src.models.domain.knowledge_base  # noqa: F401
+            import src.models.domain.skill  # noqa: F401
             from src.db.base import Base
             from src.db.session import _engine
 
@@ -383,10 +394,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ---- 中间件注册（顺序重要：先注册的先执行） ----
+    # ---- 中间件注册（顺序重要：外→内执行） ----
     setup_cors(app)
-    app.add_middleware(RequestLoggingMiddleware)
-    app.add_middleware(TenantMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)   # 1. 安全头（最外层）
+    app.add_middleware(RateLimitMiddleware)         # 2. 限流
+    app.add_middleware(RequestLoggingMiddleware)    # 3. 日志
+    app.add_middleware(TenantMiddleware)            # 4. 租户（最内层）
 
     # ---- 异常处理 ----
     @app.exception_handler(AppException)

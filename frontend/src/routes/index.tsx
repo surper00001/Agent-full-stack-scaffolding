@@ -16,6 +16,9 @@ import AdminConversationsPage from "@/pages/admin/conversations";
 import AdminTenantPage from "@/pages/admin/tenant";
 import AdminUsersPage from "@/pages/admin/users";
 import AdminUserDetailPage from "@/pages/admin/users/[id]";
+import AdminSkillsPage from "@/pages/admin/skills";
+import AdminSkillDetailPage from "@/pages/admin/skills/[id]";
+import AdminSkillNewPage from "@/pages/admin/skills/new";
 import LoginPage from "@/pages/login";
 import RegisterPage from "@/pages/register";
 import NotFoundPage from "@/pages/not-found";
@@ -57,6 +60,9 @@ export function AppRoutes() {
           <Route path="admin/tenant" element={<AdminTenantPage />} />
           <Route path="admin/users" element={<AdminUsersPage />} />
           <Route path="admin/users/:id" element={<AdminUserDetailPage />} />
+          <Route path="admin/skills" element={<AdminSkillsPage />} />
+          <Route path="admin/skills/new" element={<AdminSkillNewPage />} />
+          <Route path="admin/skills/:id" element={<AdminSkillDetailPage />} />
         </Route>
 
         {/* 公开页面 */}

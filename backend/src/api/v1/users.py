@@ -32,6 +32,7 @@ async def list_users(
     """获取所有用户列表（仅管理员），支持分页和搜索。"""
     service = UserService(db)
     items, total = await service.list_users(
+        tenant_id=_admin.tenant_id,
         page=page,
         page_size=page_size,
         search=search,
@@ -57,7 +58,7 @@ async def get_user_detail(
 ) -> APIResponse[UserDetailResponse]:
     """获取单个用户详细信息（仅管理员）。"""
     service = UserService(db)
-    detail = await service.get_user_detail(user_id)
+    detail = await service.get_user_detail(user_id, tenant_id=_admin.tenant_id)
     return APIResponse(
         message="获取成功",
         data=UserDetailResponse(**detail),
@@ -80,6 +81,7 @@ async def get_user_conversations(
     service = UserService(db)
     items, total = await service.get_user_conversations(
         user_id=user_id,
+        tenant_id=_admin.tenant_id,
         page=page,
         page_size=page_size,
     )
@@ -108,7 +110,7 @@ async def get_user_token_usage(
 ) -> APIResponse[UserTokenTrendResponse]:
     """获取指定用户的 Token 消耗明细（按对话聚合）（仅管理员）。"""
     service = UserService(db)
-    data = await service.get_user_token_usage(user_id)
+    data = await service.get_user_token_usage(user_id, tenant_id=_admin.tenant_id)
     return APIResponse(
         message="获取成功",
         data=UserTokenTrendResponse(**data),
@@ -128,7 +130,7 @@ async def get_user_token_trend(
 ) -> APIResponse[list[DailyTokenItem]]:
     """获取指定用户的 Token 按日使用趋势（仅管理员）。"""
     service = UserService(db)
-    trend = await service.get_user_token_trend(user_id, days)
+    trend = await service.get_user_token_trend(user_id, tenant_id=_admin.tenant_id, days=days)
     return APIResponse(
         message="获取成功",
         data=[DailyTokenItem(**item) for item in trend],
@@ -143,7 +145,7 @@ async def delete_user(
 ) -> APIResponse:
     """软删除指定用户（仅管理员）。管理员账户不可删除自身。"""
     service = UserService(db)
-    await service.delete_user(user_id)
+    await service.delete_user(user_id, tenant_id=_admin.tenant_id)
     return APIResponse(message="用户已删除")
 
 
@@ -155,7 +157,7 @@ async def delete_user_conversations(
 ) -> APIResponse:
     """清空指定用户的所有对话记录（仅管理员）。"""
     service = UserService(db)
-    count = await service.delete_user_conversations(user_id)
+    count = await service.delete_user_conversations(user_id, tenant_id=_admin.tenant_id)
     return APIResponse(message=f"已清空 {count} 条对话记录")
 
 
@@ -168,7 +170,7 @@ async def set_token_quota(
 ) -> APIResponse:
     """设置指定用户的 Token 配额上限（仅管理员）。"""
     service = UserService(db)
-    result = await service.set_token_quota(user_id, body.token_quota)
+    result = await service.set_token_quota(user_id, tenant_id=_admin.tenant_id, token_quota=body.token_quota)
     return APIResponse(
         message="Token 配额已更新",
         data=result,
@@ -184,7 +186,7 @@ async def update_user_role(
 ) -> APIResponse:
     """更新指定用户的角色（仅管理员）。"""
     service = UserService(db)
-    result = await service.update_user_role(user_id, body.role)
+    result = await service.update_user_role(user_id, tenant_id=_admin.tenant_id, role=body.role)
     return APIResponse(
         message="用户角色已更新",
         data=result,
@@ -199,7 +201,7 @@ async def toggle_user_active(
 ) -> APIResponse:
     """启用或禁用指定用户（仅管理员）。"""
     service = UserService(db)
-    result = await service.toggle_user_active(user_id)
+    result = await service.toggle_user_active(user_id, tenant_id=_admin.tenant_id)
     return APIResponse(
         message=f"用户已{'启用' if result['is_active'] else '禁用'}",
         data=result,

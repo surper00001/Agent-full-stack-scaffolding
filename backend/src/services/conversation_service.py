@@ -150,7 +150,7 @@ class ConversationService:
         )
         result = await self._msg_repo.create(msg)
 
-        conv = await self._conv_repo.get_by_id(conversation_id)
+        conv = await self._conv_repo.get_by_id_with_tenant(conversation_id, tenant_id)
         if conv:
             conv.message_count = (conv.message_count or 0) + 1
             await self._conv_repo.update(conv)
@@ -186,7 +186,7 @@ class ConversationService:
         )
         result = await self._msg_repo.create(msg)
 
-        conv = await self._conv_repo.get_by_id(conversation_id)
+        conv = await self._conv_repo.get_by_id_with_tenant(conversation_id, tenant_id)
         if conv:
             conv.message_count = (conv.message_count or 0) + 1
             await self._conv_repo.update(conv)

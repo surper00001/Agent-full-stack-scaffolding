@@ -128,6 +128,9 @@ class Settings(BaseSettings):
     multi_tenant_enabled: bool = Field(default=False, alias="MULTI_TENANT_ENABLED")
     tenant_header_name: str = Field(default="x-tenant-id", alias="TENANT_HEADER_NAME")
 
+    # ---- 限流 ----
+    rate_limit_enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
+
     # ---- Agent ----
     agent_max_iterations: int = Field(default=15, alias="AGENT_MAX_ITERATIONS")
     agent_max_execution_time: int = Field(

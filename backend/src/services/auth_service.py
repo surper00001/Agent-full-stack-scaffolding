@@ -87,7 +87,7 @@ class AuthService:
         if not await self._verify_code(verify_target, "captcha", code):
             raise InvalidVerificationCodeError()
 
-        await self._check_unique(username, phone, email)
+        await self._check_unique(username, phone, email, tenant_id)
 
         user = User(
             username=username,
@@ -100,14 +100,14 @@ class AuthService:
         return await self._user_repo.create(user)
 
     async def _check_unique(
-        self, username: str, phone: str | None, email: str | None
+        self, username: str, phone: str | None, email: str | None, tenant_id: str,
     ) -> None:
-        """检查用户名、手机号、邮箱是否已被注册。"""
-        if await self._get_by_username(username):
+        """检查用户名、手机号、邮箱是否已被注册（租户范围内唯一）。"""
+        if await self._get_by_username(username, tenant_id):
             raise UserAlreadyExistsError("用户名", username)
-        if phone and await self._get_by_phone(phone):
+        if phone and await self._get_by_phone(phone, tenant_id):
             raise UserAlreadyExistsError("手机号", phone)
-        if email and await self._get_by_email(email):
+        if email and await self._get_by_email(email, tenant_id):
             raise UserAlreadyExistsError("邮箱", email)
 
     # ---- 登录（双 Token） ----
@@ -132,7 +132,12 @@ class AuthService:
 
         # Access Token（JWT，短有效期）
         access_token, expires_in = create_access_token(
-            data={"sub": user.id, "username": user.username, "role": user.role},
+            data={
+                "sub": user.id,
+                "username": user.username,
+                "role": user.role,
+                "tenant_id": user.tenant_id,
+            },
         )
 
         # Refresh Token（随机字符串，长有效期）
@@ -201,27 +206,28 @@ class AuthService:
     # ---- 当前用户 ----
 
     async def get_current_user(self, token: str) -> User | None:
-        """从 JWT Access Token 获取当前用户。"""
+        """从 JWT Access Token 获取当前用户（租户范围内）。"""
         payload = decode_access_token(token)
         if payload is None:
             return None
         user_id = payload.get("sub")
+        tenant_id = payload.get("tenant_id", "default")
         if user_id is None:
             return None
-        return await self._user_repo.get_by_id(user_id)
+        return await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
 
     # ---- 查询辅助 ----
 
-    async def _get_by_username(self, username: str) -> User | None:
-        users = await self._user_repo.list_all(username=username)
+    async def _get_by_username(self, username: str, tenant_id: str) -> User | None:
+        users = await self._user_repo.list_all(tenant_id=tenant_id, username=username)
         return users[0] if users else None
 
-    async def _get_by_phone(self, phone: str) -> User | None:
-        users = await self._user_repo.list_all(phone=phone)
+    async def _get_by_phone(self, phone: str, tenant_id: str) -> User | None:
+        users = await self._user_repo.list_all(tenant_id=tenant_id, phone=phone)
         return users[0] if users else None
 
-    async def _get_by_email(self, email: str) -> User | None:
-        users = await self._user_repo.list_all(email=email)
+    async def _get_by_email(self, email: str, tenant_id: str) -> User | None:
+        users = await self._user_repo.list_all(tenant_id=tenant_id, email=email)
         return users[0] if users else None
 
     # ---- 个人信息管理 ----
@@ -229,29 +235,30 @@ class AuthService:
     async def update_profile(
         self,
         user_id: str,
+        tenant_id: str,
         username: str | None = None,
         email: str | None = None,
         phone: str | None = None,
     ) -> User:
         """更新用户个人信息。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None:
             raise UserNotFoundError()
 
         if username is not None:
-            existing = await self._get_by_username(username)
+            existing = await self._get_by_username(username, tenant_id)
             if existing and existing.id != user_id:
                 raise UserAlreadyExistsError("用户名", username)
             user.username = username
 
         if email is not None:
-            existing = await self._get_by_email(email)
+            existing = await self._get_by_email(email, tenant_id)
             if existing and existing.id != user_id:
                 raise UserAlreadyExistsError("邮箱", email)
             user.email = email
 
         if phone is not None:
-            existing = await self._get_by_phone(phone)
+            existing = await self._get_by_phone(phone, tenant_id)
             if existing and existing.id != user_id:
                 raise UserAlreadyExistsError("手机号", phone)
             user.phone = phone
@@ -261,11 +268,12 @@ class AuthService:
     async def change_password(
         self,
         user_id: str,
+        tenant_id: str,
         old_password: str,
         new_password: str,
     ) -> None:
         """修改用户密码。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None:
             raise UserNotFoundError()
 

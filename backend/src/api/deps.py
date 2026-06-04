@@ -26,6 +26,7 @@ class CurrentUser(NamedTuple):
     id: str
     username: str
     role: str
+    tenant_id: str
 
 
 def get_current_tenant(
@@ -66,6 +67,7 @@ async def get_current_user(
     user_id = payload.get("sub")
     username = payload.get("username", "")
     role = payload.get("role", "user")
+    tenant_id = payload.get("tenant_id", "default")
 
     if user_id is None:
         raise UnauthorizedError("令牌无效")
@@ -76,7 +78,7 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise UnauthorizedError("用户不存在或已禁用")
 
-    return CurrentUser(id=user_id, username=username, role=role)
+    return CurrentUser(id=user_id, username=username, role=role, tenant_id=tenant_id)
 
 
 async def require_admin(

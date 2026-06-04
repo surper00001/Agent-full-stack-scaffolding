@@ -19,6 +19,7 @@ import {
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SafeMarkdown } from "@/components/common/safe-markdown";
 import * as conversationsApi from "@/api/conversations";
 import * as kbApi from "@/api/knowledge-base";
 import type { KnowledgeBaseListItem, KBCitation } from "@/types";
@@ -41,25 +42,7 @@ function formatTime(iso?: string) {
   }
 }
 
-/** 简易 Markdown 渲染（处理粗体、代码块、换行） */
-function SimpleMarkdown({ text }: { text: string }) {
-  const html = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    // 代码块
-    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-muted/50 rounded-md p-3 my-2 overflow-x-auto text-xs"><code>$2</code></pre>')
-    // 行内代码
-    .replace(/`([^`]+)`/g, '<code class="bg-muted/50 px-1 py-0.5 rounded text-xs font-mono">$1</code>')
-    // 粗体
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    // 斜体
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    // 换行
-    .replace(/\n/g, "<br/>");
-
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
-}
+/** 简易 Markdown 渲染: replaced with SafeMarkdown (react-markdown + rehype-sanitize) */
 
 /**
  * 对话详情页 — 企业级聊天 UX
@@ -621,11 +604,11 @@ function MessageBubble({
           )}
         >
           {isStreaming ? (
-            <SimpleMarkdown text={message.content} />
+            <SafeMarkdown>{message.content}</SafeMarkdown>
           ) : isUser ? (
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           ) : (
-            <SimpleMarkdown text={message.content} />
+            <SafeMarkdown>{message.content}</SafeMarkdown>
           )}
         </div>
 

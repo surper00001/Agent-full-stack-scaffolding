@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 
 // https://vitejs.dev/config/
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -13,6 +14,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    host: "0.0.0.0",
     // 代理后端API，开发时避免跨域问题
     proxy: {
       "/api": {
@@ -23,10 +25,18 @@ export default defineConfig({
       },
     },
   },
+  esbuild: {
+    jsx: "automatic",
+  },
   test: {
     globals: true,
     environment: "jsdom",
     setupFiles: ["./test/setup.ts"],
     include: ["test/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
+    server: {
+      deps: {
+        inline: ["react-markdown", "rehype-sanitize", "remark-gfm"],
+      },
+    },
   },
 });

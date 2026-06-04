@@ -289,9 +289,21 @@ class AgentGraphBuilder:
 
         return executor_node
 
-    # ---- Tool Node ----
+    # ---- Tool Node (流式并行调度) ----
 
     def _make_tool_node(self):
+        """构建流式并行工具执行节点。
+
+        调度规则：
+        - 只读工具之间可以并行
+        - 非并发安全的工具独占执行
+        - 非只读工具独占总线
+        - 未知工具降级到工具注册表查询
+        """
+        import asyncio
+
+        from src.harness.tool_registry import get_tool as get_harness_tool
+
         # 构建工具名→工具对象的映射
         tool_map: dict[str, Any] = {t.name: t for t in self._tools}
 
@@ -299,44 +311,88 @@ class AgentGraphBuilder:
             messages = state["messages"]
             last_message = messages[-1]
 
-            outputs: list[ToolMessage] = []
-            if isinstance(last_message, AIMessage) and last_message.tool_calls:
-                for tool_call in last_message.tool_calls:
-                    tool_name = tool_call.get("name", "")
-                    tool_args = tool_call.get("args", {})
-                    tool_id = tool_call.get("id", "")
+            if not (isinstance(last_message, AIMessage) and last_message.tool_calls):
+                return {"messages": []}
 
-                    t = tool_map.get(tool_name)
-                    if t is None:
-                        result_text = (
-                            f"工具 '{tool_name}' 未找到。"
-                            f"可用工具: {', '.join(tool_map.keys())}。"
-                            f"提示：使用 tool_search 查询可用工具。"
-                        )
-                        logger.warning(f"未知工具调用: {tool_name}")
-                    else:
-                        try:
-                            output = await t.ainvoke(tool_args)
-                            result_text = str(output) if not isinstance(output, str) else output
-                            if result_text.startswith(("搜索失败:", "博查搜索 API Key")) or (
-                                "超时，请稍后重试" in result_text
-                            ):
-                                logger.warning(
-                                    f"工具 {tool_name} 业务失败: {result_text[:160]}"
-                                )
-                            else:
-                                logger.info(f"工具 {tool_name} 执行成功")
-                        except Exception as e:
-                            result_text = f"工具执行异常: {e}"
-                            logger.error(f"工具 {tool_name} 执行失败: {e}")
+            tool_calls = last_message.tool_calls
+            if not tool_calls:
+                return {"messages": []}
 
-                    outputs.append(ToolMessage(
-                        content=result_text,
-                        tool_call_id=tool_id,
-                        name=tool_name,
-                    ))
+            # ── 分类工具调用 ──
+            read_only_calls: list[dict] = []       # 只读 + 并发安全 → 并行
+            write_calls: list[dict] = []            # 读写 → 独占
+            exclusive_calls: list[dict] = []        # 非并发安全 → 独占
+            unknown_calls: list[dict] = []
 
-            return {"messages": outputs}
+            for tc in tool_calls:
+                tool_name = tc.get("name", "")
+                harness_tool = get_harness_tool(tool_name)
+                lc_tool = tool_map.get(tool_name)
+
+                if harness_tool is not None:
+                    # 有 HarnessTool 元数据 → 按规则分类
+                    tool_args = tc.get("args", {})
+                    try:
+                        input_obj = harness_tool.input_schema(**tool_args)
+                        if harness_tool.is_read_only(input_obj) and harness_tool.is_concurrency_safe(input_obj):
+                            read_only_calls.append(tc)
+                        elif not harness_tool.is_concurrency_safe(input_obj):
+                            exclusive_calls.append(tc)
+                        else:
+                            write_calls.append(tc)
+                    except Exception:
+                        exclusive_calls.append(tc)  # schema 解析失败 → 安全起见独占
+                elif lc_tool is not None:
+                    # 旧版 LangChain tool → 保守策略：独占
+                    exclusive_calls.append(tc)
+                else:
+                    unknown_calls.append(tc)
+
+            # ── 执行：按调度策略分组 ──
+            outputs: dict[str, ToolMessage] = {}  # tool_call_id → ToolMessage
+
+            # 1) 只读 + 并发安全 → 全部并行
+            if read_only_calls:
+                results = await asyncio.gather(
+                    *[_invoke_tool(tc, tool_map) for tc in read_only_calls],
+                    return_exceptions=True,
+                )
+                for tc, result in zip(read_only_calls, results):
+                    msg = _to_tool_message(tc, result)
+                    outputs[tc.get("id", "")] = msg
+
+            # 2) 读写工具 → 逐一执行（互斥）
+            for tc in write_calls:
+                result = await _invoke_tool(tc, tool_map)
+                outputs[tc.get("id", "")] = _to_tool_message(tc, result)
+
+            # 3) 非并发安全 → 逐一执行（互斥）
+            for tc in exclusive_calls:
+                result = await _invoke_tool(tc, tool_map)
+                outputs[tc.get("id", "")] = _to_tool_message(tc, result)
+
+            # 4) 未知工具
+            for tc in unknown_calls:
+                tool_name = tc.get("name", "")
+                result_text = (
+                    f"工具 '{tool_name}' 未找到。"
+                    f"可用工具: {', '.join(tool_map.keys())}。"
+                    f"提示：使用 tool_search 查询可用工具。"
+                )
+                logger.warning(f"未知工具调用: {tool_name}")
+                outputs[tc.get("id", "")] = ToolMessage(
+                    content=result_text,
+                    tool_call_id=tc.get("id", ""),
+                    name=tool_name,
+                )
+
+            # ── 保持原始调用顺序返回 ──
+            ordered = [
+                outputs[tc.get("id", "")]
+                for tc in tool_calls
+                if tc.get("id", "") in outputs
+            ]
+            return {"messages": ordered}
 
         return tool_node
 
@@ -350,6 +406,67 @@ class AgentGraphBuilder:
         if isinstance(last_message, AIMessage) and last_message.tool_calls:
             return "continue"
         return "end"
+
+
+# ── Tool Node 辅助函数 ──
+
+async def _invoke_tool(tool_call: dict, tool_map: dict[str, Any]) -> Any:
+    """调用单个工具，返回原始结果或异常对象。"""
+    from src.harness.tool_registry import get_tool as get_harness_tool
+
+    tool_name = tool_call.get("name", "")
+    tool_args = tool_call.get("args", {})
+
+    # 优先走 HarnessTool（支持权限检查、AbortSignal）
+    harness_tool = get_harness_tool(tool_name)
+    if harness_tool is not None:
+        try:
+            from src.harness.abort_signal import AbortSignal
+
+            input_obj = harness_tool.input_schema(**tool_args)
+
+            # 权限检查
+            perm = harness_tool.check_permissions(input_obj)
+            if not perm.allowed:
+                return f"[权限拒绝] {perm.reason}"
+
+            signal = AbortSignal(name=f"agent-{tool_name}")
+            result = await harness_tool.execute(input_obj, signal)
+            return harness_tool.render_result(result)
+        except Exception as e:
+            return f"工具执行异常: {type(e).__name__}: {e}"
+
+    # 降级到 LangChain tool
+    lc_tool = tool_map.get(tool_name)
+    if lc_tool is not None:
+        try:
+            output = await lc_tool.ainvoke(tool_args)
+            result_text = str(output) if not isinstance(output, str) else output
+            if result_text.startswith(("搜索失败:", "博查搜索 API Key")) or (
+                "超时，请稍后重试" in result_text
+            ):
+                logger.warning(f"工具 {tool_name} 业务失败: {result_text[:160]}")
+            else:
+                logger.info(f"工具 {tool_name} 执行成功")
+            return result_text
+        except Exception as e:
+            logger.error(f"工具 {tool_name} 执行失败: {e}")
+            return f"工具执行异常: {e}"
+
+    return None
+
+
+def _to_tool_message(tool_call: dict, result: Any) -> ToolMessage:
+    """将工具调用结果转换为 ToolMessage。"""
+    tool_name = tool_call.get("name", "")
+    tool_id = tool_call.get("id", "")
+
+    if isinstance(result, Exception):
+        result_text = f"工具执行异常: {type(result).__name__}: {result}"
+    else:
+        result_text = str(result) if not isinstance(result, str) else result
+
+    return ToolMessage(content=result_text, tool_call_id=tool_id, name=tool_name)
 
 
 def create_default_graph(

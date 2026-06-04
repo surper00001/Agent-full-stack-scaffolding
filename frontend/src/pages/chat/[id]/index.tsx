@@ -14,6 +14,7 @@ import type { ContextUsageSnapshot, ToolCall } from "@/types";
 import { useKBStore, useConversationStore } from "@/stores";
 import { CitationCards, parseKBCitations, parseCitationsFromArray, type KBCitation } from "@/components/kb/citation-cards";
 import { InlineImageMessage } from "@/components/kb/inline-image-message";
+import { SafeMarkdown } from "@/components/common/safe-markdown";
 import { MindMapRenderer, type MindMap } from "@/components/kb/mindmap-renderer";
 import { extractMindmapFromMetadata, parseMindmapFromContent } from "@/components/kb/mindmap-utils";
 
@@ -65,28 +66,7 @@ function getDownloadUrl(url: string) {
   return `${API_BASE_URL}${url}`;
 }
 
-// ---- Markdown Renderer ----
-
-function SimpleMarkdown({ text }: { text: string }) {
-  const html = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/```(\w*)\n([\s\S]*?)```/g,
-      '<pre class="bg-zinc-950 text-zinc-200 rounded-lg p-4 my-3 overflow-x-auto text-xs leading-relaxed"><code>$2</code></pre>')
-    .replace(/`([^`]+)`/g,
-      '<code class="bg-muted px-1.5 py-0.5 rounded text-[13px] font-mono">$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/### (.+)/g, '<h3 class="text-base font-semibold mt-4 mb-2">$1</h3>')
-    .replace(/## (.+)/g, '<h2 class="text-lg font-semibold mt-5 mb-2">$1</h2>')
-    .replace(/# (.+)/g, '<h1 class="text-xl font-bold mt-6 mb-3">$1</h1>')
-    .replace(/^\- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
-    .replace(/^\d+\. (.+)$/gm, '<li class="ml-4 list-decimal">$1</li>')
-    .replace(/\n/g, "<br/>");
-
-  return <span dangerouslySetInnerHTML={{ __html: html }} />;
-}
+// ---- Markdown Renderer: replaced with SafeMarkdown (react-markdown + rehype-sanitize) ----
 
 function mapMessageToLocal(m: {
   id: string;
@@ -1133,10 +1113,10 @@ function MessageBubble({
             <InlineImageMessage
               text={message.content}
               citations={message.citations}
-              renderMarkdown={(t) => <SimpleMarkdown text={t} />}
+              renderMarkdown={(t) => <SafeMarkdown>{t}</SafeMarkdown>}
             />
           ) : (
-            <SimpleMarkdown text={message.content} />
+            <SafeMarkdown>{message.content}</SafeMarkdown>
           )}
         </div>
 

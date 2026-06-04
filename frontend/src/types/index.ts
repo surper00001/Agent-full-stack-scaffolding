@@ -48,3 +48,14 @@ export type {
   KnowledgeBase,
   KnowledgeBaseListItem,
 } from "./knowledge-base";
+export type {
+  Skill,
+  SkillDetail,
+  CreateSkillRequest,
+  UpdateSkillRequest,
+  GenerateSkillRequest,
+  SkillTestRequest,
+  SkillTestResult,
+  SkillGenerateResult,
+} from "./skill";
+export { STATUS_COLORS, STATUS_LABELS } from "./skill";

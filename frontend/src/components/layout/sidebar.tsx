@@ -10,6 +10,7 @@ import {
   User,
   Users,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -18,6 +19,7 @@ const ADMIN_NAV_ITEMS = [
   { to: "/admin", icon: LayoutDashboard, label: "仪表盘" },
   { to: "/admin/users", icon: Users, label: "用户管理" },
   { to: "/admin/agents", icon: Bot, label: "Agent管理" },
+  { to: "/admin/skills", icon: Zap, label: "Skill管理" },
   { to: "/admin/conversations", icon: MessageSquare, label: "对话记录" },
   { to: "/admin/tenant", icon: Building2, label: "租户管理" },
   { to: "/profile", icon: User, label: "用户中心" },

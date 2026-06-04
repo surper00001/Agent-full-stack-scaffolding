@@ -25,6 +25,7 @@ import src.models.domain.refresh_token  # noqa: E402, F401
 import src.models.domain.conversation  # noqa: E402, F401
 import src.models.domain.agent  # noqa: E402, F401
 import src.models.domain.knowledge_base  # noqa: E402, F401
+import src.models.domain.skill  # noqa: E402, F401
 
 # 目标元数据
 target_metadata = Base.metadata

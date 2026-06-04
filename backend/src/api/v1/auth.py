@@ -152,6 +152,7 @@ async def update_profile(
     service = AuthService(db)
     user = await service.update_profile(
         user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
         username=body.username,
         email=body.email,
         phone=body.phone,
@@ -169,6 +170,7 @@ async def change_password(
     service = AuthService(db)
     await service.change_password(
         user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
         old_password=body.old_password,
         new_password=body.new_password,
     )

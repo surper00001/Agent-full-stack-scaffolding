@@ -1,4 +1,5 @@
 import { AuthenticatedImage } from "./authenticated-image";
+import DOMPurify from "dompurify";
 
 /** 知识库内容块通用字段（文档查看 + 搜索结果共用） */
 export interface KBBlockData {
@@ -44,6 +45,7 @@ function prepareTableHtml(rawHtml: string): {
   mergedCells: number;
 } {
   try {
+    // eslint-disable-next-line no-undef -- browser built-in
     const parser = new DOMParser();
     const doc = parser.parseFromString(rawHtml, "text/html");
     const table = doc.querySelector("table");
@@ -112,7 +114,7 @@ export function KBBlockRenderer({ block, kbId, docId, compact = false }: KBBlock
           )}
           <div
             className="kb-table-wrapper"
-            dangerouslySetInnerHTML={{ __html: processedHtml }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(processedHtml) }}
           />
         </div>
         {canShowImage && (

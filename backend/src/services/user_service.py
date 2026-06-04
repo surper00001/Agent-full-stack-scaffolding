@@ -24,11 +24,12 @@ class UserService:
 
     async def list_users(
         self,
+        tenant_id: str = "default",
         page: int = 1,
         page_size: int = 20,
         search: str | None = None,
     ) -> tuple[list[dict], int]:
-        """分页查询用户列表，含对话数和 Token 总量聚合。"""
+        """分页查询用户列表，含对话数和 Token 总量聚合（租户范围内）。"""
         skip = (page - 1) * page_size
 
         # 子查询：每个用户的对话数
@@ -62,7 +63,7 @@ class UserService:
             .label("total_tokens")
         )
 
-        conditions = [User.is_deleted == False]
+        conditions = [User.is_deleted == False, User.tenant_id == tenant_id]
         if search:
             search_term = f"%{search}%"
             conditions.append(
@@ -117,9 +118,9 @@ class UserService:
 
     # ---- 用户详情 ----
 
-    async def get_user_detail(self, user_id: str) -> dict:
-        """获取用户详情，含统计数据和最近对话。"""
-        user = await self._user_repo.get_by_id(user_id)
+    async def get_user_detail(self, user_id: str, tenant_id: str = "default") -> dict:
+        """获取用户详情，含统计数据和最近对话（租户范围内）。"""
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
 
@@ -208,11 +209,12 @@ class UserService:
     async def get_user_conversations(
         self,
         user_id: str,
+        tenant_id: str = "default",
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
         """获取某用户的所有对话（含 Token 消耗）。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
 
@@ -274,9 +276,10 @@ class UserService:
     async def get_user_token_usage(
         self,
         user_id: str,
+        tenant_id: str = "default",
     ) -> dict:
         """获取用户的 Token 消耗明细（按对话聚合）。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
 
@@ -327,10 +330,11 @@ class UserService:
     async def get_user_token_trend(
         self,
         user_id: str,
+        tenant_id: str = "default",
         days: int = 7,
     ) -> list[dict]:
         """获取用户 Token 使用趋势（按日聚合）。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
 
@@ -368,9 +372,9 @@ class UserService:
 
     # ---- 管理操作 ----
 
-    async def delete_user(self, user_id: str) -> bool:
-        """软删除用户。"""
-        user = await self._user_repo.get_by_id(user_id)
+    async def delete_user(self, user_id: str, tenant_id: str = "default") -> bool:
+        """软删除用户（租户范围内）。"""
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
         if user.role == "admin":
@@ -381,16 +385,16 @@ class UserService:
             )
         return await self._user_repo.soft_delete(user_id)
 
-    async def delete_user_conversations(self, user_id: str) -> int:
+    async def delete_user_conversations(self, user_id: str, tenant_id: str = "default") -> int:
         """清空用户的所有对话（软删除）。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
         return await self._conv_repo.soft_delete_by_filter(user_id=user_id)
 
-    async def set_token_quota(self, user_id: str, token_quota: int) -> dict:
+    async def set_token_quota(self, user_id: str, tenant_id: str, token_quota: int) -> dict:
         """设置用户的 Token 配额。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
 
@@ -410,9 +414,9 @@ class UserService:
             "token_quota": token_quota,
         }
 
-    async def update_user_role(self, user_id: str, role: str) -> dict:
+    async def update_user_role(self, user_id: str, tenant_id: str, role: str) -> dict:
         """更新用户角色。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
 
@@ -424,9 +428,9 @@ class UserService:
             "role": role,
         }
 
-    async def toggle_user_active(self, user_id: str) -> dict:
+    async def toggle_user_active(self, user_id: str, tenant_id: str = "default") -> dict:
         """启用/禁用用户。"""
-        user = await self._user_repo.get_by_id(user_id)
+        user = await self._user_repo.get_by_id_with_tenant(user_id, tenant_id)
         if user is None or user.is_deleted:
             raise UserNotFoundError()
         if user.role == "admin":

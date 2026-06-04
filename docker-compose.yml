@@ -1,0 +1,98 @@
+# =============================================================================
+# Harness Engineering — Docker Compose 基础设施
+# =============================================================================
+# 用途：管理 Harness Sandbox 沙箱宿主机及相关服务
+#
+# 启动方式（在 WSL2 内执行）：
+#   docker compose -f docker-compose.yml up -d
+#
+# 或在 Windows 宿主机通过 wsl 调用：
+#   wsl bash -c "cd /mnt/c/... && docker compose up -d"
+#
+# 依赖：WSL2 + Docker Engine（非 Docker Desktop 也可）
+# =============================================================================
+
+x-sandbox-base: &sandbox-base
+  image: harness-sandbox:latest
+  build:
+    context: ./sandbox
+    dockerfile: Dockerfile
+  # 沙箱实例按需动态创建，compose 只管理基础镜像和服务
+  # 运行时通过 wsl_docker_sandbox.py 的 docker run --rm 创建临时容器
+  restart: "no"
+  network_mode: "none"
+  read_only: true
+  tmpfs:
+    - /tmp:size=64M,noexec,nosuid
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  cap_add:
+    - CHOWN
+    - SETUID
+    - SETGID
+  ulimits:
+    nproc: 128
+    nofile:
+      soft: 64
+      hard: 128
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "1m"
+      max-file: "1"
+
+services:
+  # ── 沙箱镜像构建服务（仅用于构建，不长期运行） ──
+  sandbox-builder:
+    <<: *sandbox-base
+    container_name: harness-sandbox-builder
+    entrypoint: ["echo", "Sandbox image built successfully"]
+    # 构建后立即退出，仅用于验证镜像可用
+
+  # ── Sandbox 健康检查调度器（可选） ──
+  # 定期清理过期容器、检查镜像完整性
+  sandbox-cleaner:
+    image: harness-sandbox:latest
+    container_name: harness-sandbox-cleaner
+    entrypoint:
+      - bash
+      - -c
+      - |
+        echo "Harness Sandbox Cleaner started"
+        while true; do
+          # 清理 10 分钟前的未运行容器
+          docker ps -a --filter "name=sandbox-" --filter "status=exited" \
+            --format '{{.Names}}' 2>/dev/null | while read name; do
+            docker rm "$name" 2>/dev/null || true
+          done
+          sleep 300
+        done
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+    profiles:
+      - full  # 仅在 full profile 下启动
+
+  # ── 可选：本地 PyPI 镜像缓存（大幅加速 pip install） ──
+  # pypi-cache:
+  #   image: devpi:latest
+  #   container_name: harness-pypi-cache
+  #   ports:
+  #     - "3141:3141"
+  #   volumes:
+  #     - pypi_data:/data
+  #   profiles:
+  #     - full
+
+volumes:
+  pypi_data:
+    driver: local
+
+# =============================================================================
+# 网络说明：
+#   - 默认沙箱容器使用 network_mode: "none"（完全无网络）
+#   - 需要网络的 Skill 由 wsl_docker_sandbox.py 根据安全策略动态设置
+#   - sandbox-cleaner 需要访问 docker.sock，通过 volume 挂载
+# =============================================================================
