@@ -1,6 +1,6 @@
 """认证服务层：注册、登录、验证码、双 Token 管理。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pyotp
 from sqlalchemy import or_, select
@@ -145,7 +145,7 @@ class AuthService:
         refresh_token_record = RefreshToken(
             token_hash=token_hash,
             user_id=user.id,
-            expires_at=datetime.now(timezone.utc)
+            expires_at=datetime.now(UTC)
             + timedelta(days=settings.jwt_refresh_token_expire_days),
         )
         await self._token_repo.create(refresh_token_record)

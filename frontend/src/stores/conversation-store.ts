@@ -51,10 +51,14 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   },
 
   deleteConversation: async (id) => {
-    await conversationsApi.deleteConversation(id);
-    set((s) => ({
-      conversations: s.conversations.filter((c) => c.id !== id),
-    }));
+    // 乐观删除 — 先更新 UI，失败时回滚
+    const prev = get().conversations;
+    set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) }));
+    try {
+      await conversationsApi.deleteConversation(id);
+    } catch {
+      set({ conversations: prev });
+    }
   },
 
   refreshConversations: async () => {

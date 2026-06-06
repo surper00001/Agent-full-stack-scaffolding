@@ -5,6 +5,7 @@
  * 替代所有 dangerouslySetInnerHTML 的简易 Markdown 实现，
  * 消除 XSS 攻击面。
  */
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -73,7 +74,7 @@ const markdownComponents = {
   ),
 };
 
-export function SafeMarkdown({ children, className }: SafeMarkdownProps) {
+export const SafeMarkdown = memo(function SafeMarkdown({ children, className }: SafeMarkdownProps) {
   return (
     <span className={className}>
       <ReactMarkdown
@@ -85,4 +86,4 @@ export function SafeMarkdown({ children, className }: SafeMarkdownProps) {
       </ReactMarkdown>
     </span>
   );
-}
+});

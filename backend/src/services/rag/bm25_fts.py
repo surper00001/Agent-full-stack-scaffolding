@@ -15,9 +15,8 @@ import re
 import sqlite3
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from langchain_core.documents import Document
 from loguru import logger
 
 if TYPE_CHECKING:

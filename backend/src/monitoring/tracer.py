@@ -9,14 +9,13 @@ LLM 监测模块 — Langfuse + OpenTelemetry。
 
 from __future__ import annotations
 
-import asyncio
 import time
 from contextlib import contextmanager
 from typing import Any
 
 from loguru import logger
 
-from src.core.config import Settings, get_settings
+from src.core.config import get_settings
 
 
 class _MonitoringManager:
@@ -159,7 +158,7 @@ class _MonitoringManager:
             try:
                 self._langfuse_handler.flush()
             except Exception:
-                pass
+                logger.debug("Langfuse flush 失败（连接可能已关闭）")
 
 
 # 全局单例

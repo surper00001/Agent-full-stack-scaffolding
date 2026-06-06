@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useUserAdminStore } from "@/stores";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +13,7 @@ import { useDebounce } from "@/hooks";
 const PAGE_SIZE = 20;
 
 export default function AdminUsersPage() {
+  const confirm = useConfirm();
   const { users, total, loading, fetchUsers, deleteUser, toggleUserActive } = useUserAdminStore();
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
@@ -25,19 +27,19 @@ export default function AdminUsersPage() {
 
   const handleDelete = useCallback(
     async (userId: string, username: string) => {
-      if (!confirm(`确定删除用户「${username}」？此操作不可恢复。`)) return;
+      if (!await confirm({ description: `确定删除用户「${username}」？此操作不可恢复。`, variant: "destructive" })) return;
       await deleteUser(userId);
     },
-    [deleteUser],
+    [deleteUser, confirm],
   );
 
   const handleToggleActive = useCallback(
     async (userId: string, username: string, currentActive: boolean) => {
       const action = currentActive ? "禁用" : "启用";
-      if (!confirm(`确定${action}用户「${username}」？`)) return;
+      if (!await confirm({ description: `确定${action}用户「${username}」？` })) return;
       await toggleUserActive(userId);
     },
-    [toggleUserActive],
+    [toggleUserActive, confirm],
   );
 
   return (

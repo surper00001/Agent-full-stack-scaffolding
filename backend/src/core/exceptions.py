@@ -144,8 +144,9 @@ class InvalidCredentialsError(AppException):
 class UserNotFoundError(NotFoundError):
     """用户不存在。"""
 
-    def __init__(self, identifier: str) -> None:
+    def __init__(self, identifier: str = "") -> None:
+        msg = f"用户不存在: {identifier}" if identifier else "用户不存在"
         super().__init__(
-            message=f"用户不存在: {identifier}",
-            detail={"identifier": identifier},
+            message=msg,
+            detail={"identifier": identifier} if identifier else {},
         )

@@ -165,7 +165,14 @@ class ContextSummarizer:
             )
 
         try:
-            response = await self._llm.ainvoke([HumanMessage(content=prompt)])
+            from src.llm.resilience import resilient_ainvoke
+
+            response = await resilient_ainvoke(
+                self._llm,
+                [HumanMessage(content=prompt)],
+                provider="context_summarizer",
+                max_retries=2,
+            )
             return response.content if isinstance(response.content, str) else str(response.content)
         except Exception:
             return existing_summary or ""

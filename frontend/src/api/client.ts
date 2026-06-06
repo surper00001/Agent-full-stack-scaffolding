@@ -11,7 +11,8 @@ import {
 
 /**
  * Axios实例 — 全局HTTP客户端
- * 包含：请求拦截（注入Token）、响应拦截（401自动刷新、统一错误处理）
+ * 包含：请求拦截（注入Token）、响应拦截（401自动刷新、统一错误处理）、
+ * GET 请求去重（in-flight dedup）
  */
 
 // 刷新Token锁 — 防止并发401同时刷新
@@ -122,3 +123,42 @@ client.interceptors.response.use(
 );
 
 export default client;
+
+// ── GET 请求去重 ──
+
+/** In-flight GET 请求映射表 — key → Promise */
+const _inflightGets = new Map<string, Promise<unknown>>();
+
+/**
+ * 带去重的 GET 请求：同一 URL+params 的并发请求自动复用结果。
+ *
+ * 用法（替代 client.get）:
+ *   const { data } = await dedupedGet<User[]>("/api/v1/users", { params: { page: 1 } });
+ */
+export async function dedupedGet<T = unknown>(
+  url: string,
+  config?: Record<string, unknown>,
+): Promise<{ data: T }> {
+  const key = `${url}::${JSON.stringify(config || {})}`;
+
+  const existing = _inflightGets.get(key);
+  if (existing) {
+    return existing as Promise<{ data: T }>;
+  }
+
+  const promise = client
+    .get<T>(url, config)
+    .then((res) => ({ data: res.data }))
+    .finally(() => {
+      _inflightGets.delete(key);
+    });
+
+  // 防止内存泄漏：Map 最大 50 条
+  if (_inflightGets.size >= 50) {
+    const firstKey = _inflightGets.keys().next().value;
+    if (firstKey) _inflightGets.delete(firstKey);
+  }
+  _inflightGets.set(key, promise);
+
+  return promise;
+}

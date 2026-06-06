@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useConversations } from "@/hooks";
+import { useConfirm } from "@/hooks/use-confirm";
 import {
   Card,
   CardHeader,
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button";
  * 展示所有历史对话，支持删除
  */
 export default function ConversationsPage() {
+  const confirm = useConfirm();
   const {
     conversations,
     isLoading,
@@ -61,10 +63,10 @@ export default function ConversationsPage() {
                     variant="ghost"
                     size="icon"
                     className="text-destructive hover:text-destructive"
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      if (confirm("确定删除该对话？")) {
+                      if (await confirm({ description: "确定删除该对话？", variant: "destructive" })) {
                         deleteConversation(conv.id);
                       }
                     }}

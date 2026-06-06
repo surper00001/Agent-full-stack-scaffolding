@@ -9,7 +9,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-
 # ── 请求 Schema ──
 
 class SkillCreateRequest(BaseModel):

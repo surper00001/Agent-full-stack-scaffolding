@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useKBStore } from "@/stores";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +12,7 @@ import { Plus, Search, Library, FileText, HardDrive, Trash2 } from "lucide-react
 
 export default function KnowledgeBasesPage() {
   const { kbList, kbLoading, fetchKBList, createKB, deleteKB } = useKBStore();
+  const confirm = useConfirm();
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -43,7 +45,7 @@ export default function KnowledgeBasesPage() {
   const handleDelete = async (e: React.MouseEvent, id: string, name: string) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm(`确定删除知识库「${name}」？所有文档和索引将被清除。`)) return;
+    if (!await confirm({ description: `确定删除知识库「${name}」？所有文档和索引将被清除。`, variant: "destructive" })) return;
     await deleteKB(id);
   };
 

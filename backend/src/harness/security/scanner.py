@@ -187,7 +187,7 @@ class CodeScanner:
                         code=ast.unparse(node) if hasattr(ast, "unparse") else func_name,
                         message=f"禁止调用危险函数: {func_name}()",
                         rule="forbidden-function",
-                        suggestion=f"请使用安全替代方案或通过工具系统操作",
+                        suggestion="请使用安全替代方案或通过工具系统操作",
                     ))
 
                 # 检查 __import__ 属性调用

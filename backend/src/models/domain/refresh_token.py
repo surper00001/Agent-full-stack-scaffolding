@@ -1,6 +1,6 @@
 """Refresh Token 领域模型。"""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import UUID, Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,14 +31,14 @@ class RefreshToken(UUIDPrimaryKeyMixin, Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         server_default=func.now(),
         nullable=False,
     )
 
     @property
     def is_expired(self) -> bool:
-        return datetime.now(timezone.utc) > self.expires_at
+        return datetime.now(UTC) > self.expires_at
 
     @property
     def is_valid(self) -> bool:

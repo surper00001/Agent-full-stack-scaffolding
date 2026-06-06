@@ -1,6 +1,6 @@
 """Token 统计服务层 — 聚合查询 Token 消耗数据。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +20,7 @@ class TokenStatsService:
         Returns:
             dict with: quota, used, daily_usage, by_agent, recent_records, compared_to_last_month
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         since = now - timedelta(days=days)
         prev_since = since - timedelta(days=days)  # 上期对比
 

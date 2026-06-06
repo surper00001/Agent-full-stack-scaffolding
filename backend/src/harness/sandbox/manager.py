@@ -12,10 +12,9 @@ Sandbox Manager — 沙箱池管理器。
 from __future__ import annotations
 
 import asyncio
-import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
-from typing import AsyncIterator
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -124,7 +123,7 @@ class SandboxManager:
             self._in_use.add(sandbox._id)
             self._total_acquired += 1
             yield sandbox
-        except Exception as e:
+        except Exception:
             self._total_failed += 1
             raise
         finally:

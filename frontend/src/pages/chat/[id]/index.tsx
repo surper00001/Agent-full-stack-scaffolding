@@ -3,7 +3,7 @@ import { useParams, useSearchParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import type { ChatMode } from "@/types";
 import {
-  Send, Bot, User, Square, Copy, Check, ChevronDown, RefreshCw, Clock,
+  Send, Bot, Square, Check, ChevronDown, RefreshCw,
   Wrench, Loader2, Download, ListChecks, FileText, Zap, MessageSquare, Brain, Workflow,
   Library, BookOpen, X, ImagePlus,
 } from "lucide-react";
@@ -13,8 +13,7 @@ import { API_BASE_URL, CONTEXT_MAX_TOKENS } from "@/lib/constants";
 import type { ContextUsageSnapshot, ToolCall } from "@/types";
 import { useKBStore, useConversationStore } from "@/stores";
 import { CitationCards, parseKBCitations, parseCitationsFromArray, type KBCitation } from "@/components/kb/citation-cards";
-import { InlineImageMessage } from "@/components/kb/inline-image-message";
-import { SafeMarkdown } from "@/components/common/safe-markdown";
+import { MessageBubble } from "@/components/chat/message-bubble";
 import { MindMapRenderer, type MindMap } from "@/components/kb/mindmap-renderer";
 import { extractMindmapFromMetadata, parseMindmapFromContent } from "@/components/kb/mindmap-utils";
 
@@ -149,7 +148,6 @@ export default function ChatDetailPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState("");
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [conversationTitle, setConversationTitle] = useState("");
 
@@ -497,12 +495,6 @@ export default function ChatDetailPage() {
     }
   };
 
-  const handleCopy = async (content: string, msgId: string) => {
-    await navigator.clipboard.writeText(content);
-    setCopiedId(msgId);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
-
   const usagePct = tokenUsage.quota > 0 ? tokenUsage.used / tokenUsage.quota : 0;
 
   // ---- Render ----
@@ -628,26 +620,11 @@ export default function ChatDetailPage() {
 
         {/* Messages */}
         {messages.map((msg) => (
-          <div key={msg.id}>
-            <MessageBubble
-              message={msg}
-              isCopied={copiedId === msg.id}
-              onCopy={() => handleCopy(msg.content, msg.id)}
-            />
-            {msg.citations && msg.citations.length > 0 && (
-              <CitationCards citations={msg.citations} />
-            )}
-            {msg.mindmap && (
-              <div className="px-4 pb-2">
-                <div className="max-w-[75%] ml-11">
-                  <MindMapRenderer
-                    data={msg.mindmap}
-                    onSendMessage={(cmd) => handleSend(undefined, cmd)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            showTime={msg.created_at ? formatTime(msg.created_at) : null}
+          />
         ))}
 
         {/* Live tool calls */}
@@ -679,8 +656,6 @@ export default function ChatDetailPage() {
           <MessageBubble
             message={{ id: "stream", role: "assistant", content: streamContent }}
             isStreaming
-            isCopied={false}
-            onCopy={() => {}}
           />
         )}
 
@@ -1062,94 +1037,4 @@ function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-// ---- Message Bubble ----
-
-function MessageBubble({
-  message, isStreaming, isCopied, onCopy,
-}: {
-  message: LocalMessage;
-  isStreaming?: boolean;
-  isCopied: boolean;
-  onCopy: () => void;
-}) {
-  const isUser = message.role === "user";
-  const isSystem = message.role === "system";
-
-  if (isSystem) {
-    return (
-      <div className="flex justify-center px-4 py-2">
-        <span className="text-xs text-destructive/70 bg-destructive/[0.04] rounded-full px-3 py-1">
-          {message.content}
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <div className={cn(
-      "group flex gap-3 px-6 py-3 hover:bg-muted/[0.02] transition-colors",
-      isUser && "flex-row-reverse",
-    )}>
-      {/* Avatar */}
-      <div className={cn(
-        "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs",
-        isUser ? "bg-foreground text-background" : "bg-muted text-muted-foreground",
-      )}>
-        {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
-      </div>
-
-      <div className={cn("flex max-w-[72%] flex-col", isUser && "items-end")}>
-        {/* Bubble */}
-        <div className={cn(
-          "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
-          isUser
-            ? "bg-foreground/[0.08] text-foreground rounded-tr-md"
-            : "bg-muted/40 text-foreground/90 rounded-tl-md",
-          isStreaming && "streaming-cursor border border-dashed border-foreground/10",
-        )}>
-          {isUser ? (
-            <p className="whitespace-pre-wrap break-words">{message.content}</p>
-          ) : message.citations && message.citations.length > 0 ? (
-            <InlineImageMessage
-              text={message.content}
-              citations={message.citations}
-              renderMarkdown={(t) => <SafeMarkdown>{t}</SafeMarkdown>}
-            />
-          ) : (
-            <SafeMarkdown>{message.content}</SafeMarkdown>
-          )}
-        </div>
-
-        {/* Actions */}
-        <div className={cn(
-          "flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity",
-          isUser && "flex-row-reverse",
-        )}>
-          {message.created_at && (
-            <span className="flex items-center gap-1 text-[10px] text-muted-foreground/50">
-              <Clock className="h-3 w-3" />
-              {formatTime(message.created_at)}
-            </span>
-          )}
-          {!isUser && !isStreaming && message.content && (
-            <button
-              onClick={onCopy}
-              className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground transition-colors"
-            >
-              {isCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
-            </button>
-          )}
-        </div>
-
-        {/* File downloads (persisted messages) */}
-        {!isStreaming && message.files && message.files.length > 0 && (
-          <div className="mt-2 space-y-1.5 w-full">
-            {message.files.map((f, i) => (
-              <FileCard key={f.filename + i} file={f} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+// MessageBubble 已提取至 @/components/chat/message-bubble.tsx

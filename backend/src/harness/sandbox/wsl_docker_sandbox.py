@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
-import os
 import shutil
 import tempfile
 import time
@@ -130,7 +128,7 @@ class WSLDockerSandbox(BaseSandbox):
 
             # Docker exec
             result = await self._docker_exec(
-                command=f"python /workspace/exec.py",
+                command="python /workspace/exec.py",
                 timeout_seconds=timeout,
             )
             result.sandbox_id = self._id
@@ -251,7 +249,7 @@ class WSLDockerSandbox(BaseSandbox):
                     process.communicate(), timeout=timeout_seconds + 10,
                 )
                 killed = False
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # 强制停止容器
                 self._status = SandboxStatus.BUSY
                 stop_cmd = self._wsl_wrap(f"docker stop -t 5 {self._container_name}")

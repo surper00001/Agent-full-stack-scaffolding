@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { cn } from "@/lib/utils";
 
 interface LoadingSpinnerProps {
@@ -11,8 +12,11 @@ const sizeClasses = {
   lg: "h-12 w-12",
 };
 
-/** 通用加载动画 */
-export function LoadingSpinner({ size = "md", className }: LoadingSpinnerProps) {
+/** 通用加载动画（纯展示组件，memo 优化） */
+export const LoadingSpinner = memo(function LoadingSpinner({
+  size = "md",
+  className,
+}: LoadingSpinnerProps) {
   return (
     <div className={cn("flex items-center justify-center", className)}>
       <div
@@ -23,4 +27,4 @@ export function LoadingSpinner({ size = "md", className }: LoadingSpinnerProps) 
       />
     </div>
   );
-}
+});

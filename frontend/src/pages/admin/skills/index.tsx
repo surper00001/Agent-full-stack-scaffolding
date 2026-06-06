@@ -24,6 +24,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { getStatusLabel, getStatusColor } from "@/components/harness";
 import { STATUS_LABELS } from "@/types/skill";
 import { cn } from "@/lib/utils";
+import { useConfirm } from "@/hooks/use-confirm";
 import type { Skill } from "@/types/skill";
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -357,6 +358,7 @@ function SkillRow({
   onDelete: (id: string) => void;
 }) {
   const [acting, setActing] = useState(false);
+  const confirm = useConfirm();
   const SecIcon = SECURITY_ICONS[skill.security_level] ?? Shield;
 
   return (
@@ -448,9 +450,9 @@ function SkillRow({
           <Button
             size="sm"
             variant="ghost"
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
-              if (confirm(`确认删除 Skill "${skill.display_name}"？`)) {
+              if (await confirm({ description: `确认删除 Skill "${skill.display_name}"？`, variant: "destructive" })) {
                 onDelete(skill.id);
               }
             }}

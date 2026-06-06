@@ -20,6 +20,8 @@ from langgraph.graph import END, START, StateGraph, add_messages
 from loguru import logger
 from typing_extensions import TypedDict
 
+from src.core.config import get_settings
+
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langgraph.graph.state import CompiledStateGraph
@@ -191,7 +193,14 @@ class AgentGraphBuilder:
             ]
 
             try:
-                resp = await plan_llm.ainvoke(plan_messages)
+                from src.llm.resilience import resilient_ainvoke
+
+                provider = get_settings().llm_provider
+                resp = await resilient_ainvoke(
+                    plan_llm, plan_messages,
+                    provider=f"{provider}/planner",
+                    max_retries=2,  # 规划阶段快速失败
+                )
                 plan_text = resp.content if isinstance(resp.content, str) else str(resp.content)
 
                 # 解析 JSON 计划
@@ -269,7 +278,14 @@ class AgentGraphBuilder:
                 )
                 messages = list(messages) + [step_hint]
 
-            response = await llm.ainvoke(messages)
+            from src.llm.resilience import resilient_ainvoke
+
+            provider = get_settings().llm_provider
+            response = await resilient_ainvoke(
+                llm, messages,
+                provider=f"{provider}/executor",
+                max_retries=3,
+            )
 
             # 如果 response 没有 tool_calls 且还有后续步骤，推进步骤
             next_step = current_step

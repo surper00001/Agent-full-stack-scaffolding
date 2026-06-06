@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks";
 import { useAuthStore, useUIStore } from "@/stores";
 import { useConversations } from "@/hooks";
 import { useAgentStore } from "@/stores";
+import { useConfirm } from "@/hooks/use-confirm";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -147,6 +148,7 @@ function ChatSidebar({
   const { conversations, fetchConversations, createConversation, deleteConversation } = useConversations();
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const { user } = useAuthStore();
+  const confirm = useConfirm();
 
   useEffect(() => {
     fetchAgents(1, 100);
@@ -168,7 +170,7 @@ function ChatSidebar({
     async (e: React.MouseEvent, convId: string) => {
       e.preventDefault();
       e.stopPropagation();
-      if (!confirm("确定删除该对话？")) return;
+      if (!await confirm({ description: "确定删除该对话？", variant: "destructive" })) return;
       await deleteConversation(convId);
       if (currentPath === `/chat/${convId}`) {
         navWithKb("/chat");

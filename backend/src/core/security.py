@@ -1,7 +1,7 @@
 """安全模块：JWT 令牌管理 + 密码哈希。"""
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 from jose import JWTError, jwt
@@ -22,18 +22,18 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> t
     settings = get_settings()
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = datetime.now(UTC) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(
+        expire = datetime.now(UTC) + timedelta(
             minutes=settings.jwt_access_token_expire_minutes
         )
-    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc), "type": "access"})
+    to_encode.update({"exp": expire, "iat": datetime.now(UTC), "type": "access"})
     token = jwt.encode(
         to_encode,
         settings.jwt_secret_key.get_secret_value(),
         algorithm=settings.jwt_algorithm,
     )
-    return token, int((expire - datetime.now(timezone.utc)).total_seconds())
+    return token, int((expire - datetime.now(UTC)).total_seconds())
 
 
 def decode_access_token(token: str) -> dict | None:

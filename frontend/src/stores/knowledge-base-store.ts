@@ -157,14 +157,16 @@ export const useKBStore = create<KBStore>((set, get) => ({
   },
 
   deleteKB: async (id) => {
+    // 乐观删除 — 先更新 UI，失败时回滚
+    const prev = { kbList: get().kbList, currentKB: get().currentKB };
+    set({
+      kbList: get().kbList.filter((k) => k.id !== id),
+      currentKB: prev.currentKB?.id === id ? null : prev.currentKB,
+    });
     try {
       await kbApi.deleteKB(id);
-      set({
-        kbList: get().kbList.filter((k) => k.id !== id),
-        currentKB: get().currentKB?.id === id ? null : get().currentKB,
-      });
     } catch (err) {
-      set({ kbError: (err as Error).message });
+      set({ kbList: prev.kbList, currentKB: prev.currentKB, kbError: (err as Error).message });
     }
   },
 

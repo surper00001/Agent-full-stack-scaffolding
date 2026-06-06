@@ -25,7 +25,8 @@ gRPC API: http://localhost:6334
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from langchain_core.documents import Document
 from loguru import logger

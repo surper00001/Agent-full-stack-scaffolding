@@ -4,8 +4,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from src.models.schemas.response import ConversationItem
-
 
 class UserListItem(BaseModel):
     """用户列表项。"""

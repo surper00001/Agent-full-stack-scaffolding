@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import base64
 import contextlib
 import re
 
 from loguru import logger
 
 from src.services.chunking_service import StructuredBlock
-from src.services.reference_extractor import ReferenceExtractor
 from src.services.document_processors.layout import (
     BlockTagger,
     LayoutTag,

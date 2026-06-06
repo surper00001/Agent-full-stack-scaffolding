@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAgents } from "@/hooks";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -18,6 +19,7 @@ const AGENT_TYPES = [
 ];
 
 export default function AgentsPage() {
+  const confirm = useConfirm();
   const { agents, isLoading, createAgent, deleteAgent } = useAgents();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
@@ -110,7 +112,7 @@ export default function AgentsPage() {
                     <span>{agent.model_name}</span>
                     <Button
                       variant="ghost" size="sm" className="text-destructive hover:text-destructive"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (confirm("确定删除该Agent？")) deleteAgent(agent.id); }}
+                      onClick={async (e) => { e.preventDefault(); e.stopPropagation(); if (await confirm({ description: "确定删除该Agent？", variant: "destructive" })) deleteAgent(agent.id); }}
                     >
                       删除
                     </Button>

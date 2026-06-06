@@ -1,7 +1,9 @@
 """管理员仪表盘统计 API。"""
 
+from datetime import UTC
+
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,9 +34,9 @@ async def get_admin_stats(
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[AdminStatsResponse]:
     """获取管理仪表盘的汇总统计数据（仅管理员）。"""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
     # 总用户数
     user_count_stmt = select(func.count(User.id)).where(User.is_deleted == False)

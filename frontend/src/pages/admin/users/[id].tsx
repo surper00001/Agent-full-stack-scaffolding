@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useUserAdminStore } from "@/stores";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,7 @@ export default function AdminUserDetailPage() {
   const [trendDays, setTrendDays] = useState(7);
   const [editingQuota, setEditingQuota] = useState(false);
   const [quotaInput, setQuotaInput] = useState("");
+  const confirm = useConfirm();
 
   useEffect(() => {
     if (!id) return;
@@ -57,9 +59,9 @@ export default function AdminUserDetailPage() {
 
   const handleDeleteConversations = useCallback(async () => {
     if (!id || !currentUser) return;
-    if (!confirm(`确定清空用户「${currentUser.username}」的所有对话记录？此操作不可恢复。`)) return;
+    if (!await confirm({ description: `确定清空用户「${currentUser.username}」的所有对话记录？此操作不可恢复。`, variant: "destructive" })) return;
     await deleteUserConversations(id);
-  }, [id, currentUser, deleteUserConversations]);
+  }, [id, currentUser, deleteUserConversations, confirm]);
 
   const handleSaveQuota = useCallback(async () => {
     if (!id) return;
@@ -72,17 +74,17 @@ export default function AdminUserDetailPage() {
   const handleToggleActive = useCallback(async () => {
     if (!id || !currentUser) return;
     const action = currentUser.is_active ? "禁用" : "启用";
-    if (!confirm(`确定${action}用户「${currentUser.username}」？`)) return;
+    if (!await confirm({ description: `确定${action}用户「${currentUser.username}」？` })) return;
     await toggleUserActive(id);
-  }, [id, currentUser, toggleUserActive]);
+  }, [id, currentUser, toggleUserActive, confirm]);
 
   const handleRoleChange = useCallback(async () => {
     if (!id || !currentUser) return;
     const newRole = currentUser.role === "admin" ? "user" : "admin";
     const action = newRole === "admin" ? "提升为管理员" : "降级为普通用户";
-    if (!confirm(`确定将「${currentUser.username}」${action}？`)) return;
+    if (!await confirm({ description: `确定将「${currentUser.username}」${action}？` })) return;
     await updateUserRole(id, newRole);
-  }, [id, currentUser, updateUserRole]);
+  }, [id, currentUser, updateUserRole, confirm]);
 
   if (!id) return null;
   if (detailLoading || !currentUser) {

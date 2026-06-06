@@ -68,11 +68,16 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   deleteAgent: async (id: string) => {
-    await agentApi.deleteAgent(id);
+    // 乐观删除 — 先更新 UI，失败时回滚
+    const prev = { agents: get().agents, currentAgent: get().currentAgent };
     set({
       agents: get().agents.filter((a) => a.id !== id),
-      currentAgent:
-        get().currentAgent?.id === id ? null : get().currentAgent,
+      currentAgent: prev.currentAgent?.id === id ? null : prev.currentAgent,
     });
+    try {
+      await agentApi.deleteAgent(id);
+    } catch {
+      set({ agents: prev.agents, currentAgent: prev.currentAgent });
+    }
   },
 }));

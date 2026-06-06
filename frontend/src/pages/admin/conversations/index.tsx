@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { useConversations } from "@/hooks";
+import { useConfirm } from "@/hooks/use-confirm";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { EmptyState } from "@/components/common/empty-state";
@@ -8,6 +9,7 @@ import { MessageSquare, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function AdminConversationsPage() {
+  const confirm = useConfirm();
   const { conversations, isLoading, fetchConversations, deleteConversation } = useConversations();
 
   useEffect(() => {
@@ -46,10 +48,10 @@ export default function AdminConversationsPage() {
                     variant="ghost"
                     size="icon"
                     className="text-destructive hover:text-destructive"
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      if (confirm("确定删除该对话？")) deleteConversation(conv.id);
+                      if (await confirm({ description: "确定删除该对话？", variant: "destructive" })) deleteConversation(conv.id);
                     }}
                   >
                     <Trash2 className="h-4 w-4" />

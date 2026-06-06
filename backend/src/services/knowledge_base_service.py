@@ -108,7 +108,7 @@ class KnowledgeBaseService:
             fts = get_bm25_fts_retriever()
             fts.delete_by_document(tenant_id, kb_id, doc_id)
         except Exception:
-            pass
+            logger.debug("FTS5 文档删除跳过（索引可能不存在）")
 
     @staticmethod
     def _sync_fts_drop(kb_id: str, tenant_id: str) -> None:
@@ -119,7 +119,7 @@ class KnowledgeBaseService:
             fts = get_bm25_fts_retriever()
             fts.drop_index(tenant_id, kb_id)
         except Exception:
-            pass
+            logger.debug("FTS5 KB 索引删除跳过（索引可能不存在）")
 
     @staticmethod
     def _sync_fts_add_chunks(kb_id: str, tenant_id: str, chunks: list[KBChunk]) -> None:
@@ -465,7 +465,7 @@ class KnowledgeBaseService:
                 build_embed_text(c, doc_filename=doc.filename, refs_captions=refs_captions)
                 for c in chunks
             ]
-            batch_size = 16
+            batch_size = get_settings().kb_embedding_batch_max
             all_embeddings: list[list[float]] = []
             total_chunks = len(chunk_texts)
             for batch_start in range(0, total_chunks, batch_size):

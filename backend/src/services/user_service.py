@@ -1,11 +1,11 @@
 """用户管理服务层 — 管理员视角的用户 CRUD 和统计。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, cast, func, or_, select, String, text
+from sqlalchemy import String, and_, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import AppException, NotFoundError, UserNotFoundError
+from src.core.exceptions import AppException, UserNotFoundError
 from src.db.repository import BaseRepository
 from src.models.domain.conversation import Conversation, Message
 from src.models.domain.user import User
@@ -338,7 +338,7 @@ class UserService:
         if user is None or user.is_deleted:
             raise UserNotFoundError()
 
-        since = datetime.now(timezone.utc) - timedelta(days=days)
+        since = datetime.now(UTC) - timedelta(days=days)
 
         # 按日期聚合 Token 消耗
         stmt = (

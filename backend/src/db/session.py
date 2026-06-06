@@ -96,5 +96,5 @@ async def close_db_engine() -> None:
 
     try:
         await asyncio.wait_for(_engine.dispose(), timeout=5)
-    except (asyncio.TimeoutError, RuntimeError, ConnectionResetError):
+    except (TimeoutError, RuntimeError, ConnectionResetError):
         pass  # 事件循环正在关闭或连接已不可达，忽略

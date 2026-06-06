@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useKBStore } from "@/stores";
+import { useConfirm } from "@/hooks/use-confirm";
+import { useToast } from "@/components/ui/use-toast";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { EmptyState } from "@/components/common/empty-state";
 import { KBDetailHeader } from "./kb-detail-header";
@@ -41,6 +43,8 @@ export default function KnowledgeBaseDetailPage() {
   const [tab, setTab] = useState<KBDetailTab>("documents");
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const confirm = useConfirm();
+  const { toast } = useToast();
 
   useEffect(() => {
     fetchKB(kbId);
@@ -72,7 +76,7 @@ export default function KnowledgeBaseDetailPage() {
   );
 
   const handleDelete = async (docId: string, filename: string) => {
-    if (!confirm(`确定删除「${filename}」？`)) return;
+    if (!await confirm({ description: `确定删除「${filename}」？`, variant: "destructive" })) return;
     await deleteDocument(kbId, docId);
   };
 
@@ -100,22 +104,22 @@ export default function KnowledgeBaseDetailPage() {
   };
 
   const handleReindex = async () => {
-    if (!confirm("将使用当前 Embedding 模型重建全部向量索引，是否继续？")) return;
+    if (!await confirm({ description: "将使用当前 Embedding 模型重建全部向量索引，是否继续？" })) return;
     await reindexKB(kbId);
-    alert("重建索引任务已启动，请稍后刷新");
+    toast({ title: "重建索引任务已启动，请稍后刷新" });
   };
 
   const handleSyncModels = async () => {
     if (
-      !confirm(
-        "将把此知识库的 Embedding / Reranker 切换为服务端默认（千问），之后需重建索引。是否继续？",
-      )
+      !await confirm({
+        description: "将把此知识库的 Embedding / Reranker 切换为服务端默认（千问），之后需重建索引。是否继续？",
+      })
     ) {
       return;
     }
     try {
       await syncKBModelsFromServer(kbId);
-      alert("模型已切换，请点击「重建索引」后再检索");
+      toast({ title: "模型已切换，请点击「重建索引」后再检索" });
     } catch {
       // kbError 已写入 store
     }

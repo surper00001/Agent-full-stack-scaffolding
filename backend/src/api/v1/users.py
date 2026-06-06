@@ -14,7 +14,6 @@ from src.models.schemas.user_admin import (
     UserDetailResponse,
     UserListItem,
     UserTokenTrendResponse,
-    UserTokenUsageItem,
 )
 from src.services.user_service import UserService
 

@@ -24,7 +24,6 @@ from loguru import logger
 
 from src.harness.sandbox.base import (
     BaseSandbox,
-    NetworkMode,
     SandboxConfig,
     SandboxResult,
     SandboxStatus,
@@ -120,7 +119,7 @@ class ProcessSandbox(BaseSandbox):
             if ast_errors:
                 return SandboxResult(
                     exit_code=1, stdout="",
-                    stderr=f"安全扫描未通过:\n" + "\n".join(f"  - {e}" for e in ast_errors),
+                    stderr="安全扫描未通过:\n" + "\n".join(f"  - {e}" for e in ast_errors),
                     duration_ms=(time.perf_counter() - start) * 1000,
                     sandbox_id=self._id,
                 )
@@ -142,7 +141,7 @@ class ProcessSandbox(BaseSandbox):
                     process.communicate(), timeout=timeout,
                 )
                 killed = False
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
                 await process.wait()
                 stdout_bytes, stderr_bytes = b"", f"执行超时 ({timeout}s)".encode()
@@ -211,7 +210,7 @@ class ProcessSandbox(BaseSandbox):
                     process.communicate(), timeout=timeout,
                 )
                 killed = False
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
                 await process.wait()
                 stdout_bytes = b""
@@ -307,7 +306,7 @@ def _check_code_safety(code: str) -> list[str]:
                 if node.func.id in ("eval", "exec", "compile"):
                     errors.append(f"禁止调用: {node.func.id}()")
                 if node.func.id == "open":
-                    errors.append(f"禁止直接调用 open()，请使用文件工具")
+                    errors.append("禁止直接调用 open()，请使用文件工具")
             # 禁止 __import__
             if isinstance(node.func, ast.Attribute):
                 if node.func.attr == "__import__":

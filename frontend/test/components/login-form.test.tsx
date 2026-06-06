@@ -16,7 +16,12 @@ function renderLoginForm(props: {
   return {
     onSubmit,
     ...render(
-      <MemoryRouter>
+      <MemoryRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
         <LoginForm
           onSubmit={onSubmit}
           isSubmitting={props.isSubmitting ?? false}

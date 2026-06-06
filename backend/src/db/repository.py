@@ -7,7 +7,7 @@
 
 from typing import Any, Generic, TypeVar
 
-from sqlalchemy import Select, and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.base import Base

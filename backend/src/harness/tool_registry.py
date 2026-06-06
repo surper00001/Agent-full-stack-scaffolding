@@ -62,11 +62,11 @@ def register_builtin_tools() -> int:
         WriteFileTool,
     )
 
-    # Shell 工具
-    from src.agents.tools.shell_tool import RunShellTool
-
     # 网络工具
     from src.agents.tools.network_tools import WebFetchTool, WebRequestTool
+
+    # Shell 工具
+    from src.agents.tools.shell_tool import RunShellTool
 
     builtins: list[HarnessTool] = [
         ReadFileTool(),
@@ -111,7 +111,6 @@ def _skill_to_tool(skill: Any) -> HarnessTool:
     """将 Skill ORM 模型转换为 HarnessTool 实例。"""
     import hashlib
     import json
-    from types import ModuleType
     from typing import ClassVar
 
     from pydantic import BaseModel, create_model

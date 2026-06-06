@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -294,7 +294,7 @@ class StreamingToolExecutor:
                 )
                 task.status = ToolTaskStatus.DONE
                 self._completed_count += 1
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 task.abort_signal.abort("执行超时")
                 task.result = ToolResult.fail(
                     name=task.tool.name,

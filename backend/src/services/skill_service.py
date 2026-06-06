@@ -195,7 +195,7 @@ class SkillService:
                     skill.avg_duration_ms = skill.avg_duration_ms * 0.9 + duration_ms * 0.1
                 await self._repo.update(skill)
         except Exception:
-            pass  # 统计失败不影响主流程
+            logger.debug("Skill 使用统计更新失败（不影响主流程）")
 
     async def count(self, tenant_id: str) -> int:
         return await self._repo.count(tenant_id=tenant_id)
