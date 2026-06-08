@@ -13,7 +13,7 @@ import os
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as GRPCExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as HTTPExporter
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumenter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
@@ -81,7 +81,7 @@ def setup_tracing(
         trace.set_tracer_provider(provider)
 
         # 自动埋点
-        FastAPIInstrumenter().instrument_app(app)
+        FastAPIInstrumentor().instrument_app(app)
         SQLAlchemyInstrumentor().instrument(
             enable_commenter=True,
             commenter_options={"opentelemetry_values": True},
@@ -96,6 +96,11 @@ def setup_tracing(
 
     except Exception as e:
         logger.warning(f"OpenTelemetry 追踪初始化失败（不影响主流程）: {e}")
+
+
+def get_tracer() -> trace.Tracer:
+    """Get the OpenTelemetry tracer for manual instrumentation."""
+    return trace.get_tracer(__name__)
 
 
 def get_current_trace_context() -> dict[str, str]:

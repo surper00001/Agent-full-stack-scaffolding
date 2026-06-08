@@ -66,6 +66,27 @@ def setup_harness_tools() -> int:
         return 0
 
 
+async def init_sandbox_pool() -> bool:
+    """初始化全局沙箱池（启动时预热）。
+
+    Returns:
+        True 如果沙箱池成功启动，False 如果降级（不影响服务可用性）。
+    """
+    try:
+        from src.harness.sandbox.manager import init_sandbox_manager
+
+        manager = await init_sandbox_manager()
+        stats = manager.stats
+        logger.info(
+            f"   沙箱池已启动: {stats['pool_size']} 个预创建, "
+            f"Docker={'可用' if stats['docker_available'] else '不可用（回退 ProcessSandbox）'}"
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"   沙箱池初始化失败（不影响核心功能）: {e}")
+        return False
+
+
 def setup_huggingface() -> None:
     """配置 HuggingFace 镜像与 Token。"""
     settings = get_settings()
@@ -99,7 +120,7 @@ async def _dev_migrate_columns() -> None:
     from src.db.session import _engine
 
     async def _add_column_if_missing(
-        conn, table: str, column: str, col_def: str,
+        table: str, column: str, col_def: str,
     ) -> None:
         """安全添加列：先检查 information_schema，失败时回退 try-except。"""
         try:
@@ -191,6 +212,7 @@ async def seed_default_agents() -> None:
         CREATIVE_ADVISOR_PROMPT,
         GENERAL_AGENT_PROMPT,
         MINDMAP_SYSTEM_PROMPT,
+        RESUME_WRITER_PROMPT,
     )
     from src.db.session import AsyncSessionLocal
     from src.models.domain.agent import AgentConfig
@@ -199,6 +221,7 @@ async def seed_default_agents() -> None:
         ("general", "综合智能助手", GENERAL_AGENT_PROMPT),
         ("creative", "创意导演·五人顾问团", CREATIVE_ADVISOR_PROMPT),
         ("mindmap", "思维导图助手", MINDMAP_SYSTEM_PROMPT),
+        ("resume_writer", "简历顾问", RESUME_WRITER_PROMPT),
     ]
 
     async with AsyncSessionLocal() as seed_session:

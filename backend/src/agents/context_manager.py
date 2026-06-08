@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol
 
+from loguru import logger
+
 from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
@@ -174,7 +176,8 @@ class ContextSummarizer:
                 max_retries=2,
             )
             return response.content if isinstance(response.content, str) else str(response.content)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"上下文摘要生成失败: {e}")
             return existing_summary or ""
 
     @staticmethod

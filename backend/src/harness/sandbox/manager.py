@@ -15,6 +15,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Any
 
 from loguru import logger
 
@@ -106,7 +107,7 @@ class SandboxManager:
             try:
                 await sandbox.stop()
             except Exception as e:
-                logger.warning(f"沙箱关闭失败: {e}")
+                logger.warning(f"沙箱关闭失败 [{sandbox._id}]: {e}")
 
         self._pool.clear()
         self._in_use.clear()
@@ -134,17 +135,21 @@ class SandboxManager:
                     try:
                         await sandbox.stop()
                     except Exception:
-                        pass
+                        logger.debug(f"沙箱 {sandbox._id} 已过期，停止时出错（忽略）")
                     sandbox = await self._create_sandbox("recycled")
                 if sandbox and sandbox.status != SandboxStatus.FAILED:
                     self._pool.append(sandbox)
 
             self._available.release()
 
-    async def execute_code(self, code: str, timeout: int | None = None) -> SandboxResult:
+    async def execute_code(
+        self, code: str, timeout: int | None = None, security_policy: Any | None = None
+    ) -> SandboxResult:
         """快捷方法：获取沙箱 → 执行代码 → 自动释放。"""
         async with self.acquire() as sandbox:
-            return await sandbox.execute_code(code, timeout or self._config.default_timeout)
+            return await sandbox.execute_code(
+                code, timeout or self._config.default_timeout, security_policy=security_policy
+            )
 
     async def execute_command(self, command: str, timeout: int | None = None) -> SandboxResult:
         """快捷方法：获取沙箱 → 执行命令 → 自动释放。"""
@@ -167,6 +172,7 @@ class SandboxManager:
                 else:
                     await sandbox.stop()
             except Exception:
+                logger.debug(f"沙箱 {sandbox._id} 健康检查失败，正在停止")
                 await sandbox.stop()
 
         # 池空，创建新的
@@ -191,7 +197,8 @@ class SandboxManager:
             result = await docker.execute_code("print('ok')", timeout_seconds=10)
             await docker.stop()
             return result.success
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Docker 探测失败: {e}")
             return False
 
     async def _create_sandbox(self, label: str) -> BaseSandbox | None:
@@ -228,6 +235,7 @@ class SandboxManager:
                         self._pool.pop(i)
                         dead_count += 1
                 except Exception:
+                    logger.debug(f"沙箱 {self._pool[i]._id} 健康检查异常，从池中移除")
                     self._pool.pop(i)
                     dead_count += 1
 

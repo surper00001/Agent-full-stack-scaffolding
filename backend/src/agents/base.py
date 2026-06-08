@@ -113,6 +113,16 @@ class BaseAgent:
         monitor = get_monitor()
         metrics = get_metrics()
         metrics.increment("agent_executions")
+        agent_type = (metadata or {}).get("agent_type", "unknown")
+
+        # 审计日志
+        from loguru import logger as _agent_logger
+        _agent_logger.info(f"Agent 开始执行: type={agent_type}")
+
+        # Prometheus: 记录 agent 执行计数
+        from src.monitoring.metrics import AGENT_EXECUTIONS, AGENT_EXECUTION_LATENCY
+        import time as _time
+        _exec_start = _time.perf_counter()
 
         raw_history = list(chat_history or [])
         optimized = await self._context_manager.prepare_context(
@@ -166,6 +176,14 @@ class BaseAgent:
                 )
 
             metrics.increment("agent_success")
+            AGENT_EXECUTIONS.labels(agent_type=agent_type, status="success").inc()
+            AGENT_EXECUTION_LATENCY.labels(agent_type=agent_type).observe(
+                _time.perf_counter() - _exec_start
+            )
+            _agent_logger.info(
+                f"Agent 执行完成: type={agent_type}, "
+                f"duration={(_time.perf_counter() - _exec_start):.1f}s"
+            )
             ctx = self._last_context_stats
             return {
                 "messages": result.get("messages", []),
@@ -183,6 +201,7 @@ class BaseAgent:
             }
 
         except Exception:
+            AGENT_EXECUTIONS.labels(agent_type=agent_type, status="failure").inc()
             logger_import = __import__("loguru", fromlist=["logger"])
             logger_import.logger.error("Agent execution failed")
             raise

@@ -108,8 +108,15 @@ class BaseSandbox(ABC):
         self,
         code: str,
         timeout_seconds: int | None = None,
+        security_policy: Any | None = None,
     ) -> SandboxResult:
-        """在沙箱中执行 Python 代码。"""
+        """在沙箱中执行 Python 代码。
+
+        Args:
+            code: Python 源代码
+            timeout_seconds: 执行超时（秒），None 使用默认配置
+            security_policy: SecurityPolicy 实例，None 使用默认 medium 策略
+        """
         ...
 
     @abstractmethod

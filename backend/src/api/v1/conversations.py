@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
+import time as _time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ from src.core.config import get_settings
 from src.core.exceptions import ForbiddenError
 from src.db.session import get_db_session
 from src.llm.factory import get_llm_factory
+from src.services.conversation_context_store import get_conversation_context_store
 from src.models.schemas.request import (
     ChatMessageRequest,
     CreateConversationRequest,
@@ -67,7 +70,8 @@ async def _to_conversation_item(
             kb_svc = KnowledgeBaseService(db)
             kb = await kb_svc.get_kb(conv.knowledge_base_id, tenant_id)
             kb_name = kb.name
-        except Exception:
+        except Exception as e:
+            logger.debug(f"查询 KB 名称失败 conv={conv.id}: {e}")
             kb_name = None
 
     # 查询用户名
@@ -80,7 +84,8 @@ async def _to_conversation_item(
             user_repo = BaseRepository[User](User, db)
             user = await user_repo.get_by_id(conv.user_id)
             username = user.username if user else None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"查询用户名失败 conv={conv.id}: {e}")
             username = None
 
     return ConversationItem(
@@ -330,12 +335,21 @@ async def _prepare_kb_send_context(
             system_prompt = f"{system_prompt}{rag_prompt}"
 
     if mode in ("agent", "plan"):
+        # 通过统一注册表获取 KBSearchHarnessTool 的 LangChain 包装器
         kb_tool = create_kb_search_tool(
             tenant_id=tenant_id,
             kb_ids=[kb_id],
             kb_names=[kb.name],
         )
         mode_tools.append(kb_tool)
+
+        # 同时设置 HarnessTool 的 KB 绑定（供 AbortSignal/权限/调度使用）
+        from src.harness.unified_registry import get_unified_registry
+        registry = get_unified_registry()
+        harness_kb = registry.get_harness_tool("search_knowledge_base")
+        if harness_kb is not None and hasattr(harness_kb, "set_binding"):
+            harness_kb.set_binding([kb_id], tenant_id)
+
         system_prompt = (
             f"{system_prompt}\n\n"
             f"## 可用知识库\n"
@@ -379,6 +393,11 @@ async def send_message(
     service = ConversationService(db)
     llm_factory = get_llm_factory()
 
+    # 初始化对话上下文向量存储（用于 ContextManager SELECTIVE/HYBRID 策略）
+    context_store = get_conversation_context_store()
+    await context_store.ensure_store()
+    service_with_context = ConversationService(db, context_store=context_store)
+
     conv = await service.get_conversation(
         conversation_id, tenant_id, _resolve_user_id(current_user)
     )
@@ -400,8 +419,8 @@ async def send_message(
             )
         image_meta = {"image_ids": body.image_ids}
 
-    # 1. 保存用户消息
-    await service.add_message_with_metadata(
+    # 1. 保存用户消息（带 context_store 写入 conversation_context 向量集合）
+    await service_with_context.add_message_with_metadata(
         conversation_id=conversation_id,
         role="user",
         content=user_content,
@@ -431,6 +450,8 @@ async def send_message(
         mode=mode,
     )
 
+    # 传入 vector_store 以启用 ContextManager SELECTIVE/HYBRID 策略
+    agent_vector_store = context_store._store if context_store.is_available else None
     agent = BaseAgent(
         llm=execute_llm,
         tools=mode_tools,
@@ -438,6 +459,7 @@ async def send_message(
         tenant_id=tenant_id,
         plan_llm=plan_llm,
         enable_planning=enable_planning,
+        vector_store=agent_vector_store,
     )
 
     resolved_kb_id = body.knowledge_base_id or conv.knowledge_base_id
@@ -449,9 +471,12 @@ async def send_message(
             tool_calls_in_flight: list[dict[str, Any]] = []
             plan_emitted = False
             all_citations: list[dict[str, Any]] = list(proactive_citations)
+            stream_start = _time.time()
+            first_token_time = None
+            total_delta_chars = 0
 
             if rag_context and rag_context.citations:
-                yield f"data: {json.dumps({'rag_context': {'citations': proactive_citations, 'kb_id': resolved_kb_id, 'kb_name': rag_context.kb_name}}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'rag_context': {'citations': proactive_citations, 'kb_id': resolved_kb_id, 'kb_name': rag_context.kb_name, '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000)}}}, ensure_ascii=False)}\n\n"
 
             try:
                 async for event in agent.stream(
@@ -460,6 +485,7 @@ async def send_message(
                     metadata={
                         "thread_id": conversation_id,
                         "user_id": current_user.id,
+                        "agent_type": conv.agent_type,
                         "tags": [conv.agent_type, mode],
                     },
                 ):
@@ -470,7 +496,7 @@ async def send_message(
                         plan_summary = planner_data.get("plan_summary", "")
                         if plan:
                             plan_emitted = True
-                            yield f"data: {json.dumps({'plan': {'steps': plan, 'summary': plan_summary}}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'plan': {'steps': plan, 'summary': plan_summary}, '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000)}}, ensure_ascii=False)}\n\n"
 
                     # Executor 事件（Plan+ReAct 执行节点）
                     for msg in _executor_messages_from_event(event):
@@ -485,18 +511,35 @@ async def send_message(
                                 }
                                 if not any(t["id"] == tc_info["id"] for t in tool_calls_in_flight):
                                     tool_calls_in_flight.append(tc_info)
-                            yield f"data: {json.dumps({'tool_calls': tool_calls_in_flight, 'status': 'tool_call'}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'tool_calls': tool_calls_in_flight, 'status': 'tool_call', '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000)}}, ensure_ascii=False)}\n\n"
 
                         # 每轮 executor 产出独立文本，需追加而非覆盖
                         text = _langchain_message_text(msg).strip()
                         if text:
-                            sep = "\n\n" if full_response else ""
-                            delta = sep + text
-                            full_response += delta
-                            file_info = _extract_file_info(delta)
-                            if file_info:
-                                yield f"data: {json.dumps({'file': file_info}, ensure_ascii=False)}\n\n"
-                            yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+                            # Extract thinking tags
+                            thinking_match = re.search(r'&lt;thinking&gt;(.*?)&lt;/thinking&gt;', text, re.DOTALL)
+                            thinking_content = None
+                            if thinking_match:
+                                thinking_content = thinking_match.group(1).strip()
+                                text = re.sub(r'&lt;thinking&gt;.*?&lt;/thinking&gt;', '', text, flags=re.DOTALL).strip()
+
+                            if thinking_content:
+                                yield f"data: {json.dumps({'thinking': thinking_content, '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000)}}, ensure_ascii=False)}\n\n"
+
+                            if text:
+                                sep = "\n\n" if full_response else ""
+                                delta = sep + text
+                                full_response += delta
+                                total_delta_chars += len(delta)
+
+                                if first_token_time is None:
+                                    first_token_time = _time.time()
+
+                                file_info = _extract_file_info(delta)
+                                if file_info:
+                                    yield f"data: {json.dumps({'file': file_info, '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000)}}, ensure_ascii=False)}\n\n"
+
+                                yield f"data: {json.dumps({'delta': delta, '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000), 'ttft_ms': int((first_token_time - stream_start) * 1000) if first_token_time else None}}, ensure_ascii=False)}\n\n"
 
                     # Tool results
                     if "tools" in event:
@@ -547,15 +590,15 @@ async def send_message(
                                 })
                             file_info = _extract_file_info(result_content)
                             if file_info:
-                                yield f"data: {json.dumps({'file': file_info}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'file': file_info, '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000)}}, ensure_ascii=False)}\n\n"
                         if tool_msgs:
-                            yield f"data: {json.dumps({'tool_results': tool_calls_in_flight, 'status': 'tool_result'}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'tool_results': tool_calls_in_flight, 'status': 'tool_result', '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000)}}, ensure_ascii=False)}\n\n"
 
                 # 最终检测完整响应中的文件链接
                 if full_response:
                     file_info = _extract_file_info(full_response)
                     if file_info:
-                        yield f"data: {json.dumps({'file': file_info}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'file': file_info, '_timing': {'elapsed_ms': int((_time.time() - stream_start) * 1000)}}, ensure_ascii=False)}\n\n"
 
                 # Save AI response
                 if full_response:
@@ -569,7 +612,7 @@ async def send_message(
                     mindmap = _extract_mindmap_meta(full_response)
                     if mindmap:
                         msg_meta["mindmap"] = mindmap
-                    await service.add_message_with_metadata(
+                    await service_with_context.add_message_with_metadata(
                         conversation_id=conversation_id,
                         role="assistant",
                         content=full_response,
@@ -579,6 +622,11 @@ async def send_message(
 
                 # Done event
                 ctx = agent.context_stats
+                total_elapsed = _time.time() - stream_start
+                ttft_ms_calc = int((first_token_time - stream_start) * 1000) if first_token_time else None
+                total_tokens = agent.get_token_usage().get("total_tokens", 0)
+                tps = total_tokens / total_elapsed if total_elapsed > 0 else 0
+
                 done_payload = json.dumps({
                     "done": True,
                     "conversation_id": conversation_id,
@@ -590,6 +638,11 @@ async def send_message(
                         "compressed_ratio": round(ctx.compressed_ratio, 3) if ctx else 0,
                         "has_summary": ctx.has_summary if ctx else False,
                     } if ctx else {},
+                    "_timing": {
+                        "total_elapsed_ms": int(total_elapsed * 1000),
+                        "ttft_ms": ttft_ms_calc,
+                        "tokens_per_second": round(tps, 1),
+                    },
                 }, ensure_ascii=False)
                 yield f"data: {done_payload}\n\n"
                 yield "data: [DONE]\n\n"
@@ -604,8 +657,11 @@ async def send_message(
                             tenant_id=tenant_id,
                         )
                     except Exception:
-                        pass
+                        logger.warning(f"保存中断响应失败 conv={conversation_id}")
                 yield "data: [DONE]\n\n"
+            except Exception:
+                logger.exception(f"SSE 流式响应异常 conv={conversation_id}")
+                yield f"data: {json.dumps({'error': '流式响应异常，请重试'}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(
             event_stream(),
@@ -624,6 +680,7 @@ async def send_message(
         metadata={
             "thread_id": conversation_id,
             "user_id": current_user.id,
+            "agent_type": conv.agent_type,
             "tags": [conv.agent_type, mode],
         },
     )
@@ -645,7 +702,7 @@ async def send_message(
         mindmap = _extract_mindmap_meta(ai_response)
         if mindmap:
             msg_meta["mindmap"] = mindmap
-        await service.add_message_with_metadata(
+        await service_with_context.add_message_with_metadata(
             conversation_id=conversation_id,
             role="assistant",
             content=ai_response,
@@ -732,121 +789,22 @@ def _extract_file_info(text: str) -> dict[str, Any] | None:
     }
 
 
-# ---- 聊天图片上传 ----
-
-_CHAT_IMAGES_DIR = Path("./data/chat-images")
-_CHAT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-_ALLOWED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff", ".tif"}
-
-
-@router.post("/{conversation_id}/images", summary="上传聊天图片（VLM 识别后作为上下文注入）")
-async def upload_chat_image(
-    conversation_id: str,
-    file: UploadFile = File(..., description="图片文件"),
-    current_user: CurrentUser = Depends(get_current_user),
-) -> dict[str, Any]:
-    """上传图片到对话中，返回 image_id 供 send 接口使用。"""
-    _require_non_admin(current_user)
-    if not file.filename:
-        return {"success": False, "code": 40001, "message": "文件名不能为空"}
-
-    ext = Path(file.filename).suffix.lower()
-    if ext not in _ALLOWED_IMAGE_EXTS:
-        return {
-            "success": False,
-            "code": 40002,
-            "message": f"不支持的图片格式: {ext}，支持: {', '.join(_ALLOWED_IMAGE_EXTS)}",
-        }
-
-    if ext in (".jpg", ".jpeg"):
-        mime_ext = ".jpg"
-    else:
-        mime_ext = ext
-
-    image_id = uuid.uuid4().hex[:12]
-    user_dir = _CHAT_IMAGES_DIR / current_user.id / conversation_id
-    user_dir.mkdir(parents=True, exist_ok=True)
-
-    filename = f"{image_id}{mime_ext}"
-    filepath = user_dir / filename
-
-    try:
-        contents = await file.read()
-        filepath.write_bytes(contents)
-        logger.info(f"聊天图片已保存: {filepath} ({len(contents)} bytes)")
-    except Exception as e:
-        logger.error(f"聊天图片保存失败: {e}")
-        return {"success": False, "code": 50001, "message": f"图片保存失败: {e}"}
-
-    # 立即用 VLM 预识别图片，以便前端可展示预览文本
-    vlm_preview: str | None = None
-    try:
-        from src.services.vlm_service import get_vlm_service
-        vlm = get_vlm_service()
-        if vlm.enabled:
-            vlm_preview, _ = vlm.describe_image(contents, mime_ext.lstrip("."))
-            if vlm_preview:
-                vlm_preview = vlm_preview.strip()
-    except Exception:
-        pass
-
-    return {
-        "success": True,
-        "code": 200,
-        "data": {
-            "image_id": image_id,
-            "filename": file.filename,
-            "preview": vlm_preview,
-        },
-    }
+# ---- 聊天图片上传（已提取到 conversations_images.py） ----
+from src.api.v1.conversations_images import (
+    resolve_image_descriptions,
+    router as images_router,
+)
 
 
 async def _resolve_image_descriptions(
     image_ids: list[str], user_id: str, conversation_id: str
 ) -> str:
-    """根据 image_ids 读取本地图片并调用 VLM 生成描述文本。
+    """根据 image_ids 读取本地图片并调用 VLM 生成描述文本。委托给独立模块。"""
+    return await resolve_image_descriptions(image_ids, user_id, conversation_id)
 
-    Returns:
-        拼接后的图片描述文本，可直接注入到用户消息中。
-    """
-    from src.services.vlm_service import get_vlm_service
 
-    vlm = get_vlm_service()
-    if not vlm.enabled:
-        return ""
-
-    parts: list[str] = []
-    user_dir = _CHAT_IMAGES_DIR / user_id / conversation_id
-
-    for iid in image_ids:
-        # 安全检查：image_id 仅允许 hex 字符
-        if not iid or len(iid) > 20 or not all(c in "0123456789abcdef" for c in iid):
-            continue
-        # 查找匹配的文件
-        matched = None
-        if user_dir.exists():
-            for f in user_dir.iterdir():
-                if f.stem == iid:
-                    matched = f
-                    break
-        if not matched:
-            continue
-        try:
-            img_bytes = matched.read_bytes()
-            ext = matched.suffix.lstrip(".")
-            desc, err = vlm.describe_image(img_bytes, ext)
-            if desc and desc.strip():
-                parts.append(f"[图片 {iid}]: {desc.strip()}")
-                logger.info(f"VLM 图片描述 ({iid}): {desc[:80]}...")
-            elif err:
-                logger.warning(f"VLM 图片描述失败 ({iid}): {err}")
-        except Exception as e:
-            logger.error(f"读取图片失败 ({iid}): {e}")
-
-    if parts:
-        return "\n\n".join(parts)
-    return ""
-
+# 注册图片上传子路由
+router.include_router(images_router)
 
 # ---- 思维导图导出 ----
 

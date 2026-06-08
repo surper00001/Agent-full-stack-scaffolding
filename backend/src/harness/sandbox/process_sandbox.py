@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from loguru import logger
 
@@ -37,13 +38,6 @@ class ProcessSandbox(BaseSandbox):
     每个实例使用独立的临时目录作为工作空间。
     适合开发和测试，不需要 Docker 环境。
     """
-
-    # 禁止的模块/函数（AST 级别）
-    _FORBIDDEN_MODULES: ClassVar[set[str]] = {
-        "os", "subprocess", "shutil", "socket", "ctypes",
-        "importlib", "sys", "builtins", "__builtins__",
-        "compile", "eval", "exec", "open",
-    }
 
     # 沙箱白名单环境变量（仅这些变量会传递给子进程）
     _ALLOWED_ENV: ClassVar[set[str]] = {
@@ -64,17 +58,6 @@ class ProcessSandbox(BaseSandbox):
         # 系统架构
         "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
         "OS", "COMSPEC",
-    }
-
-    # 允许的 safe 模块
-    _ALLOWED_MODULES: ClassVar[set[str]] = {
-        "json", "math", "statistics", "datetime", "collections",
-        "itertools", "functools", "re", "string", "textwrap",
-        "hashlib", "base64", "binascii", "uuid",
-        "typing", "dataclasses", "enum",
-        "csv", "html", "xml.etree.ElementTree", "urllib.parse",
-        "random", "secrets", "pathlib",
-        "requests", "httpx",  # 网络请求（受限于沙箱网络策略）
     }
 
     def __init__(self, config: SandboxConfig | None = None) -> None:
@@ -101,6 +84,7 @@ class ProcessSandbox(BaseSandbox):
         self,
         code: str,
         timeout_seconds: int | None = None,
+        security_policy: Any | None = None,
     ) -> SandboxResult:
         if not self._workspace:
             return SandboxResult(
@@ -114,12 +98,22 @@ class ProcessSandbox(BaseSandbox):
         start = time.perf_counter()
 
         try:
-            # AST 安全检查
-            ast_errors = _check_code_safety(code)
-            if ast_errors:
+            # 统一安全扫描 — 委托给 CodeScanner + SecurityPolicy
+            from src.harness.security.policies import SecurityPolicy, get_policy
+            from src.harness.security.scanner import CodeScanner
+
+            policy: SecurityPolicy = (
+                security_policy if isinstance(security_policy, SecurityPolicy)
+                else get_policy("medium")
+            )
+            scan_result = CodeScanner(policy).scan(code)
+            if not scan_result.passed:
+                errors_text = "\n".join(
+                    f"  - [{f.severity}] L{f.line}: {f.message}" for f in scan_result.errors
+                )
                 return SandboxResult(
                     exit_code=1, stdout="",
-                    stderr="安全扫描未通过:\n" + "\n".join(f"  - {e}" for e in ast_errors),
+                    stderr=f"安全扫描未通过 (评分={scan_result.score}):\n{errors_text}",
                     duration_ms=(time.perf_counter() - start) * 1000,
                     sandbox_id=self._id,
                 )
@@ -129,7 +123,7 @@ class ProcessSandbox(BaseSandbox):
             script_path.write_text(code, encoding="utf-8")
 
             process = await asyncio.create_subprocess_exec(
-                "python", str(script_path),
+                sys.executable, str(script_path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self._workspace),
@@ -268,50 +262,3 @@ class ProcessSandbox(BaseSandbox):
     async def restart(self) -> None:
         await self.cleanup()
         await self.start()
-
-
-# ── AST 安全扫描 ──
-
-def _check_code_safety(code: str) -> list[str]:
-    """检查代码是否包含危险操作。"""
-    import ast
-
-    errors: list[str] = []
-
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as e:
-        return [f"语法错误: {e}"]
-
-    class SafetyVisitor(ast.NodeVisitor):
-        def visit_Import(self, node: ast.Import):
-            for alias in node.names:
-                if alias.name.split(".")[0] in ProcessSandbox._FORBIDDEN_MODULES:
-                    errors.append(f"禁止导入模块: {alias.name}")
-                    # 检查是否在白名单中
-                    if alias.name in ProcessSandbox._ALLOWED_MODULES:
-                        errors.pop()  # 允许
-            self.generic_visit(node)
-
-        def visit_ImportFrom(self, node: ast.ImportFrom):
-            if node.module:
-                if node.module.split(".")[0] in ProcessSandbox._FORBIDDEN_MODULES:
-                    if node.module not in ProcessSandbox._ALLOWED_MODULES:
-                        errors.append(f"禁止从模块导入: {node.module}")
-            self.generic_visit(node)
-
-        def visit_Call(self, node: ast.Call):
-            # 禁止 eval/exec/compile/open 直接调用
-            if isinstance(node.func, ast.Name):
-                if node.func.id in ("eval", "exec", "compile"):
-                    errors.append(f"禁止调用: {node.func.id}()")
-                if node.func.id == "open":
-                    errors.append("禁止直接调用 open()，请使用文件工具")
-            # 禁止 __import__
-            if isinstance(node.func, ast.Attribute):
-                if node.func.attr == "__import__":
-                    errors.append("禁止调用 __import__()")
-            self.generic_visit(node)
-
-    SafetyVisitor().visit(tree)
-    return errors

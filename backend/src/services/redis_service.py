@@ -12,6 +12,7 @@ from typing import Any
 from loguru import logger
 
 from src.core.config import get_settings
+from src.monitoring.metrics import ACTIVE_CONNECTIONS
 
 # redis-py async import
 try:
@@ -55,6 +56,7 @@ class RedisService:
                 retry_on_timeout=True,
             )
             await self._client.ping()
+            ACTIVE_CONNECTIONS.labels(type="redis").set(1)
             logger.info("Redis connected: {}", self._settings.redis_url)
         except Exception as e:
             logger.warning("Redis unavailable (caching disabled): {}", e)
@@ -65,6 +67,7 @@ class RedisService:
         if self._client:
             await self._client.close()
             self._client = None
+            ACTIVE_CONNECTIONS.labels(type="redis").set(0)
             logger.info("Redis disconnected")
 
     @property

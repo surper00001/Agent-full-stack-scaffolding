@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { useUIStore, useAuthStore } from "@/stores";
 import {
   LayoutDashboard,
+  Activity,
   Bot,
   MessageSquare,
   Building2,
@@ -17,6 +18,7 @@ import { Button } from "@/components/ui/button";
 /** 管理员导航项 */
 const ADMIN_NAV_ITEMS = [
   { to: "/admin", icon: LayoutDashboard, label: "仪表盘" },
+  { to: "/admin/observability", icon: Activity, label: "可观测性" },
   { to: "/admin/users", icon: Users, label: "用户管理" },
   { to: "/admin/agents", icon: Bot, label: "Agent管理" },
   { to: "/admin/skills", icon: Zap, label: "Skill管理" },

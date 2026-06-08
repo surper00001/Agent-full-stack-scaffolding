@@ -53,6 +53,28 @@ class TokenUsageCallback(BaseCallbackHandler):
                 f"LLM 调用完成 | 耗时: {elapsed:.2f}s | "
                 f"输入: {prompt_tokens} tokens | 输出: {completion_tokens} tokens"
             )
+
+            # 记录 LLM 调用到可观测性追踪器
+            try:
+                from src.services.observability_service import get_llm_tracker
+
+                model_name = "unknown"
+                if response.llm_output and "model_name" in response.llm_output:
+                    model_name = response.llm_output["model_name"]
+                elif hasattr(response, "model"):
+                    model_name = str(response.model)  # type: ignore[union-attr]
+
+                get_llm_tracker().record_sync(
+                    model=model_name,
+                    node="executor",
+                    latency_ms=elapsed * 1000,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    success=True,
+                )
+            except Exception:
+                pass  # tracker recording failure is non-critical
+
         else:
             logger.debug(f"LLM 调用完成 | 耗时: {elapsed:.2f}s (token 信息不可用)")
 
@@ -102,6 +124,6 @@ def build_trace_callbacks(
         if tags:
             metadata["langfuse_tags"] = tags
     except Exception:
-        pass
+        logger.debug(f"构建 LangChain callbacks 时出错，使用空 callback 列表", exc_info=True)
 
     return callbacks, metadata

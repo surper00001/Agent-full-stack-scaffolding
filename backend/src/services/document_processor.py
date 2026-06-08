@@ -320,8 +320,8 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                                                 "bytes": rel.target_part.blob,
                                                 "ext": ext,
                                             })
-                                    except Exception:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"DOCX 图片提取失败: {e}")
 
                     text = para.text
                     if text.strip():
@@ -543,8 +543,8 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
             from PIL import Image
             with Image.open(BytesIO(img_bytes)) as pil_img:
                 img_width, img_height = pil_img.size
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"图片尺寸检测失败: {e}")
 
         if image_path is None and self._save_ctx:
             try:
@@ -597,8 +597,8 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                 vlm_description, _ = vlm.describe_image(img_bytes, ext)
                 if vlm_description.strip():
                     logger.info(f"VLM 图像描述生成成功: {vlm_description[:80]}...")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"VLM 图像描述失败: {e}")
 
         # 第四层：VLM 表格检测（识别图片中的表格并提取结构化数据）
         table_html = None
@@ -616,8 +616,8 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                     logger.info(
                         f"VLM 检测到图片中的表格: rows={len(table_data)}"
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"VLM 表格检测失败: {e}")
 
         # 构建最终内容
         if is_table_image and table_html:
@@ -667,8 +667,8 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                 try:
                     import paddle
                     paddle.set_device("cpu")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Paddle 设备设置失败: {e}")
                 from paddleocr import PaddleOCR
                 logger.info(f"初始化 PaddleOCR (lang={self._settings.kb_ocr_lang})")
                 self._ocr = PaddleOCR(
@@ -787,8 +787,8 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                             continue
                         if self._TABLE_CAPTION_RE.search(line) or len(line) < 120:
                             return line
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"表格标题检测失败: {e}")
         return None
 
     def _detect_image_caption(

@@ -236,8 +236,13 @@ async def build_rag_context(
     query: str,
     top_k: int = 5,
     rerank: bool = True,
+    signal: Any = None,
 ) -> RAGContext:
-    """执行知识库检索并构建统一 RAG 上下文。"""
+    """执行知识库检索并构建统一 RAG 上下文。
+
+    Args:
+        signal: 可选的 AbortSignal，用于中途取消检索。
+    """
     kb = await kb_svc.get_kb(kb_id, tenant_id)
     result = await kb_svc.search(
         kb_id=kb_id,
@@ -245,6 +250,7 @@ async def build_rag_context(
         tenant_id=tenant_id,
         top_k=top_k,
         rerank=rerank,
+        signal=signal,
     )
 
     raw_items = result.get("results", [])
@@ -271,8 +277,13 @@ async def search_multiple_kbs(
     query: str,
     top_k: int = 5,
     rerank: bool = True,
+    signal: Any = None,
 ) -> tuple[list[CitationItem], str, list[str], bool, str]:
-    """搜索多个知识库，去重后返回 (citations, context_text, kb_names, low_confidence, suggestion)。"""
+    """搜索多个知识库，去重后返回 (citations, context_text, kb_names, low_confidence, suggestion)。
+
+    Args:
+        signal: 可选的 AbortSignal，用于中途取消检索。
+    """
     all_citations: list[CitationItem] = []
     seen_ids: set[str] = set()
     kb_names: list[str] = []
@@ -280,9 +291,12 @@ async def search_multiple_kbs(
     best_suggestion = ""
 
     for kb_id in kb_ids:
+        if signal is not None:
+            signal.throw_if_aborted()
         try:
             ctx = await build_rag_context(
-                kb_svc, kb_id, tenant_id, query, top_k=top_k, rerank=rerank
+                kb_svc, kb_id, tenant_id, query, top_k=top_k, rerank=rerank,
+                signal=signal,
             )
             kb_names.append(ctx.kb_name)
             if ctx.low_confidence:

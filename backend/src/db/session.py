@@ -10,6 +10,7 @@ from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.core.config import get_settings
+from src.monitoring.metrics import ACTIVE_CONNECTIONS, DB_POOL_SIZE
 
 
 def _build_async_url() -> str:
@@ -68,6 +69,58 @@ AsyncSessionLocal = async_sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+
+
+# ── Prometheus 连接池指标 ──
+
+def _wire_pool_metrics() -> None:
+    """为 SQLAlchemy 连接池绑定 Prometheus 指标。
+
+    通过监听 Pool 事件同步 DB_POOL_SIZE 和 ACTIVE_CONNECTIONS 指标。
+    SQLite (NullPool) 无 pool 对象，跳过。
+    """
+    import sqlalchemy.event
+    from sqlalchemy.pool import Pool
+
+    sync_engine = getattr(_engine, "sync_engine", None)
+    if sync_engine is None:
+        return
+
+    pool = getattr(sync_engine, "pool", None)
+    if pool is None:
+        return
+
+    def _update_pool_gauges(pool: Pool) -> None:
+        """从池状态同步 Prometheus 指标。"""
+        try:
+            DB_POOL_SIZE.labels(state="checked_out").set(pool.checkedout())
+            DB_POOL_SIZE.labels(state="overflow").set(pool.overflow())
+            DB_POOL_SIZE.labels(state="total").set(pool.size())
+            ACTIVE_CONNECTIONS.labels(type="db").set(pool.checkedout())
+        except Exception:
+            pass  # 指标更新失败不应影响业务
+
+    @sqlalchemy.event.listens_for(pool, "checkout")
+    def _on_checkout(dbapi_conn, conn_record, conn_proxy):
+        _update_pool_gauges(pool)
+
+    @sqlalchemy.event.listens_for(pool, "checkin")
+    def _on_checkin(dbapi_conn, conn_record):
+        _update_pool_gauges(pool)
+
+    @sqlalchemy.event.listens_for(pool, "connect")
+    def _on_connect(dbapi_conn, conn_record):
+        _update_pool_gauges(pool)
+
+    @sqlalchemy.event.listens_for(pool, "close")
+    def _on_close(dbapi_conn, conn_record):
+        _update_pool_gauges(pool)
+
+    # 初始化值
+    _update_pool_gauges(pool)
+
+
+_wire_pool_metrics()
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:

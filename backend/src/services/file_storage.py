@@ -81,12 +81,19 @@ class FileStorageService:
         )
         return relative_path
 
+    def _validate_path(self, full_path: Path) -> Path:
+        """验证路径在 base_dir 内，防止路径穿越攻击（兼容大小写不敏感文件系统）。"""
+        resolved = full_path.resolve()
+        base_resolved = self._base_dir.resolve()
+        try:
+            resolved.relative_to(base_resolved)
+        except ValueError:
+            raise ValueError("路径穿越检测")
+        return resolved
+
     def read_file(self, stored_path: str) -> bytes:
         """读取存档文件。"""
-        full_path = self._base_dir / stored_path
-        full_path = full_path.resolve()
-        if not str(full_path).startswith(str(self._base_dir.resolve())):
-            raise ValueError("路径穿越检测")
+        full_path = self._validate_path(self._base_dir / stored_path)
         if not full_path.exists():
             raise FileNotFoundError(f"文件不存在: {stored_path}")
         return full_path.read_bytes()
@@ -111,10 +118,7 @@ class FileStorageService:
 
     def delete_document_file(self, stored_path: str) -> None:
         """删除单个文档的存档文件。"""
-        full_path = self._base_dir / stored_path
-        full_path = full_path.resolve()
-        if not str(full_path).startswith(str(self._base_dir.resolve())):
-            raise ValueError("路径穿越检测")
+        full_path = self._validate_path(self._base_dir / stored_path)
         if full_path.exists():
             full_path.unlink()
 

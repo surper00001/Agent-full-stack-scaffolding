@@ -24,7 +24,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from loguru import logger
 
@@ -100,6 +100,7 @@ class WSLDockerSandbox(BaseSandbox):
         self,
         code: str,
         timeout_seconds: int | None = None,
+        security_policy: Any | None = None,
     ) -> SandboxResult:
         if not self._wsl_available or not self._docker_available:
             return SandboxResult(
@@ -114,12 +115,22 @@ class WSLDockerSandbox(BaseSandbox):
         start = time.perf_counter()
 
         try:
-            # 安全扫描 → 写入代码文件
-            from src.harness.sandbox.process_sandbox import _check_code_safety
+            # 统一安全扫描 — 委托给 CodeScanner + SecurityPolicy
+            from src.harness.security.policies import SecurityPolicy, get_policy
+            from src.harness.security.scanner import CodeScanner
 
-            ast_errors = _check_code_safety(code)
-            if ast_errors:
-                return self._fail_result("安全扫描未通过:\n" + "\n".join(f"  - {e}" for e in ast_errors), start)
+            policy: SecurityPolicy = (
+                security_policy if isinstance(security_policy, SecurityPolicy)
+                else get_policy("medium")
+            )
+            scan_result = CodeScanner(policy).scan(code)
+            if not scan_result.passed:
+                errors_text = "\n".join(
+                    f"  - [{f.severity}] L{f.line}: {f.message}" for f in scan_result.errors
+                )
+                return self._fail_result(
+                    f"安全扫描未通过 (评分={scan_result.score}):\n{errors_text}", start
+                )
 
             # 写入代码到 workspace
             if self._workspace_host:
@@ -176,19 +187,48 @@ class WSLDockerSandbox(BaseSandbox):
         return await self.execute_command(f"pip install {' '.join(packages)}", timeout_seconds=120)
 
     async def health_check(self) -> bool:
-        result = await self.execute_command("python -c 'print(\"ok\")'")
+        result = await self.execute_command("echo ok")
         return result.success and "ok" in result.stdout
 
     async def cleanup(self) -> None:
+        # 强制清理 Docker 容器（防止进程崩溃后残留）
+        if self._container_name:
+            try:
+                rm_cmd = self._wsl_wrap(f"docker rm -f {self._container_name}")
+                proc = await asyncio.create_subprocess_exec(
+                    *rm_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await proc.wait()
+            except Exception as e:
+                logger.debug(f"Docker 清理容器 {self._container_name} 失败: {e}")
+
         if self._workspace_host and self._workspace_host.exists():
             try:
                 shutil.rmtree(self._workspace_host, ignore_errors=True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Docker 清理工作空间 {self._workspace_host} 失败: {e}")
 
     async def stop(self) -> None:
         self._status = SandboxStatus.TERMINATED
         await self.cleanup()
+
+    def __del__(self) -> None:
+        """析构兜底：进程崩溃时尽力清理容器。
+
+        注意：析构函数中不能使用 loguru（解释器可能已部分销毁），
+        因此仅静默忽略异常 —— 清理失败不会导致崩溃。
+        """
+        if self._container_name:
+            try:
+                import subprocess as _subprocess
+                _subprocess.run(
+                    ["wsl", "bash", "-c", f"docker rm -f {self._container_name}"],
+                    capture_output=True, timeout=10,
+                )
+            except Exception:
+                pass  # 析构函数：解释器可能已部分销毁，无法安全记录日志
 
     async def restart(self) -> None:
         await self.cleanup()
@@ -219,6 +259,9 @@ class WSLDockerSandbox(BaseSandbox):
             NetworkMode.FULL: "--network=bridge",
         }.get(self.config.network, "--network=none")
 
+        # 转义命令中的特殊字符，防止嵌套引号破坏 shell 解析
+        # 例如 command="print('hello')" 中的引号会截断 sh -c "..." 的外层引号
+        escaped = command.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
         docker_cmd = (
             f"docker run --rm "
             f"--name {self._container_name} "
@@ -231,7 +274,7 @@ class WSLDockerSandbox(BaseSandbox):
             f"-v {workspace}:/workspace "
             f"-w /workspace "
             f"{self.BASE_IMAGE} "
-            f"sh -c \"{command}\""
+            f"sh -c \"{escaped}\""
         )
 
         # 通过 WSL 执行
@@ -306,7 +349,8 @@ class WSLDockerSandbox(BaseSandbox):
             )
             stdout, _ = await process.communicate()
             return process.returncode == 0 if process.returncode is not None else bool(stdout.strip())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Docker 检测失败: {e}")
             return False
 
     async def _ensure_image(self) -> None:

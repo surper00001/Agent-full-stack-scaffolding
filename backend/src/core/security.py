@@ -1,5 +1,13 @@
-"""安全模块：JWT 令牌管理 + 密码哈希。"""
+"""安全模块：JWT 令牌管理 + 密码哈希。
 
+支持 JWT 密钥轮换（kid header）：
+- 活跃签名密钥始终为 jwt_secret_key (kid="default")
+- 可选配置 jwt_additional_keys 作为备用验证密钥
+- 轮换时：将旧密钥加入 jwt_additional_keys，更新 jwt_secret_key
+- 旧令牌用旧密钥验证继续有效，新令牌用新密钥签发
+"""
+
+import json
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -17,8 +25,33 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
 
+def _get_key_registry() -> dict[str, str]:
+    """获取所有验证密钥映射 (kid → secret)。
+
+    包含:
+    - 当前活跃密钥 (kid="default")
+    - 配置的附加密钥 (jwt_additional_keys, JSON 格式 [{"kid": "...", "key": "..."}, ...])
+    """
+    settings = get_settings()
+    keys = {"default": settings.jwt_secret_key.get_secret_value()}
+
+    extra_keys = settings.jwt_additional_keys
+    if extra_keys:
+        try:
+            for entry in json.loads(extra_keys):
+                if "kid" in entry and "key" in entry:
+                    keys[entry["kid"]] = entry["key"]
+        except (json.JSONDecodeError, TypeError):
+            pass  # 配置格式错误时忽略
+
+    return keys
+
+
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> tuple[str, int]:
-    """创建 JWT 访问令牌（短有效期），返回 (token, expires_in_seconds)。"""
+    """创建 JWT 访问令牌（短有效期），返回 (token, expires_in_seconds)。
+
+    令牌头部包含 kid="default"，指向当前活跃签名密钥。
+    """
     settings = get_settings()
     to_encode = data.copy()
     if expires_delta:
@@ -32,18 +65,47 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> t
         to_encode,
         settings.jwt_secret_key.get_secret_value(),
         algorithm=settings.jwt_algorithm,
+        headers={"kid": "default"},
     )
     return token, int((expire - datetime.now(UTC)).total_seconds())
 
 
 def decode_access_token(token: str) -> dict | None:
-    """解码 JWT 令牌，无效或过期返回 None。"""
+    """解码 JWT 令牌，无效或过期返回 None。
+
+    支持多密钥验证：
+    1. 从 token header 读取 kid
+    2. 从密钥注册表查找对应密钥
+    3. 如果 kid 不存在，回退到当前活跃密钥
+    """
     settings = get_settings()
+
+    # 尝试从 header 读取 kid
+    try:
+        unverified_header = jwt.get_unverified_header(token)
+    except JWTError:
+        return None
+
+    kid = unverified_header.get("kid", "default")
+    key_registry = _get_key_registry()
+    signing_key = key_registry.get(kid)
+
+    if signing_key is None:
+        # kid 未知，尝试用所有已知密钥验证
+        for _kid, key in key_registry.items():
+            try:
+                payload = jwt.decode(
+                    token, key, algorithms=[settings.jwt_algorithm],
+                )
+                if payload.get("type") == "access":
+                    return payload
+            except JWTError:
+                continue
+        return None
+
     try:
         payload = jwt.decode(
-            token,
-            settings.jwt_secret_key.get_secret_value(),
-            algorithms=[settings.jwt_algorithm],
+            token, signing_key, algorithms=[settings.jwt_algorithm],
         )
         if payload.get("type") != "access":
             return None

@@ -51,13 +51,22 @@ class RetrievalPipeline:
         rerank: bool = True,
         filters: dict[str, Any] | None = None,
         doc_repo: Any = None,
+        signal: Any = None,  # AbortSignal | None
     ) -> dict[str, Any]:
-        """执行完整检索流程（含全链路日志 + Langfuse Trace）。"""
+        """执行完整检索流程（含全链路日志 + Langfuse Trace）。
+
+        Args:
+            signal: 可选的 AbortSignal，用于中途取消检索。
+        """
         t_total_start = time.perf_counter()
         _timings: dict[str, float] = {}
 
         from src.monitoring.tracer import get_monitor
         _mon = get_monitor()
+
+        # 检查取消信号
+        if signal is not None:
+            signal.throw_if_aborted()
 
         # ═══ Step 1: Query 改写 + Embedding ═══
         logger.info(f"[检索 Step1] query='{query[:120]}' top_k={top_k} rerank={rerank}")
@@ -93,6 +102,9 @@ class RetrievalPipeline:
         t_embed_start = time.perf_counter()
         query_vector = await embedding_svc.embed_query(search_query, strategy=strategy)
         _timings["embed"] = (time.perf_counter() - t_embed_start) * 1000
+
+        if signal is not None:
+            signal.throw_if_aborted()
 
         # ═══ Step 2: Top-K Retrieval ═══
         hybrid_used = (
@@ -147,6 +159,9 @@ class RetrievalPipeline:
                 "query": query, "results": [], "total_found": 0,
                 "reranked": False, "low_confidence": False,
             }
+
+        if signal is not None:
+            signal.throw_if_aborted()
 
         # ═══ Step 3: Rerank ═══
         t_rerank_start = time.perf_counter()

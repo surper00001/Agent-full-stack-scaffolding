@@ -194,7 +194,8 @@ class ChromaVectorStore(BaseVectorStore):
             if peek["metadatas"]:
                 return peek["metadatas"][0].get("embedding_model")
             return None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"获取 Embedding 模型名失败 [collection={collection_name}]: {e}")
             return None
 
     async def similarity_search(
@@ -206,12 +207,19 @@ class ChromaVectorStore(BaseVectorStore):
         **kwargs: Any,
     ) -> list[Document]:
         """相似度检索（langchain 路径，兼容旧调用）。"""
+        import time as _t
+        _start = _t.perf_counter()
         try:
             collection = self._collection_name(collection_name, tenant_id)
             filter_dict = kwargs.pop("filter", None)
-            return self._get_collection_store(collection).similarity_search(
+            result = self._get_collection_store(collection).similarity_search(
                 query, k=top_k, filter=filter_dict, **kwargs
             )
+            from src.monitoring.metrics import VECTOR_DB_QUERY_LATENCY
+            VECTOR_DB_QUERY_LATENCY.labels(operation="search", store_type="chroma").observe(
+                _t.perf_counter() - _start
+            )
+            return result
         except Exception as e:
             raise VectorStoreError(f"相似度检索失败: {e}") from e
 
@@ -263,5 +271,6 @@ class ChromaVectorStore(BaseVectorStore):
         try:
             self._store._collection.count()  # type: ignore[union-attr]
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"ChromaDB 健康检查失败: {e}")
             return False

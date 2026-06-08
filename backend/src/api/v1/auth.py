@@ -51,10 +51,18 @@ async def send_verification_code(
     db: AsyncSession = Depends(get_db_session),
 ):
     """发送验证码到手机或邮箱。"""
+    settings = get_settings()
     service = AuthService(db)
     code = await service.send_verification_code(body.target, body.method)
+
+    # 生产环境不返回验证码明文；开发环境可返回用于调试
+    if settings.app_env == "production":
+        return APIResponse(
+            message="验证码已发送",
+            data={"target": body.target},
+        )
     return APIResponse(
-        message="验证码已发送",
+        message="验证码已发送（开发环境可见）",
         data={"target": body.target, "code": code},
     )
 
@@ -87,12 +95,31 @@ async def login(
     db: AsyncSession = Depends(get_db_session),
 ):
     """用户登录：先验图形验证码 → 返回 Access Token + Refresh Token。"""
+    # 账户级暴力破解防护：同一账户 10 分钟内最多 10 次失败
+    redis = await get_redis()
+    if redis:
+        fail_key = f"login_fail:{body.account}"
+        fail_count = await redis.get(fail_key)
+        if fail_count and int(fail_count) >= 10:
+            from src.core.exceptions import TooManyRequestsError
+            raise TooManyRequestsError("登录尝试过于频繁，请 10 分钟后重试")
+
     service = AuthService(db)
-    token_data = await service.login(body.account, body.password, body.code)
-    return APIResponse(
-        message="登录成功",
-        data=TokenResponse(**token_data),
-    )
+    try:
+        token_data = await service.login(body.account, body.password, body.code)
+        # 登录成功，清除失败计数
+        if redis:
+            await redis.delete(f"login_fail:{body.account}")
+        return APIResponse(
+            message="登录成功",
+            data=TokenResponse(**token_data),
+        )
+    except Exception:
+        # 登录失败，递增计数器
+        if redis:
+            await redis.incr(f"login_fail:{body.account}")
+            await redis.expire(f"login_fail:{body.account}", 600)
+        raise
 
 
 @router.post("/refresh", response_model=APIResponse[TokenResponse])

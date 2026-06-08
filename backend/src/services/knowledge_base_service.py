@@ -137,8 +137,8 @@ class KnowledgeBaseService:
                 logger.info(f"FTS5 表不存在，跳过增量写入（搜索时自动全量构建）: kb={kb_id}")
                 return
             fts.add_chunks(tenant_id, kb_id, chunks)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"FTS5 增量写入跳过: {e}")
 
     async def _purge_document_vectors(
         self, doc_id: str, kb_id: str, tenant_id: str
@@ -746,10 +746,14 @@ class KnowledgeBaseService:
         top_k: int = 5,
         rerank: bool = True,
         filters: dict[str, Any] | None = None,
+        signal: Any = None,
     ) -> dict[str, Any]:
         """搜索知识库——委托 RetrievalPipeline 执行完整检索链路。
 
         支持 Redis 缓存：相同查询在 TTL 内直接返回缓存结果。
+
+        Args:
+            signal: 可选的 AbortSignal，用于中途取消检索。
         """
         kb = await self.get_kb(kb_id, tenant_id)
 
@@ -775,6 +779,7 @@ class KnowledgeBaseService:
             rerank=rerank,
             filters=filters,
             doc_repo=self._doc_repo,
+            signal=signal,
         )
 
         # 写入 Redis 缓存

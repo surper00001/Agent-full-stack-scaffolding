@@ -1,4 +1,4 @@
-"""
+﻿"""
 应用入口模块。
 
 FastAPI 应用工厂：配置路由、中间件、异常处理和生命周期事件。
@@ -26,6 +26,7 @@ os.environ.setdefault("GOTRACEBACK", "crash")  # 不影响线程，只是占位
 # 以下导入必须在环境变量设置之后（torch/paddle 需在 import 前设置线程数）
 # ruff: noqa: E402
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from scalar_fastapi import get_scalar_api_reference
 
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI):
         _init_gpu_config,
         check_kb_dependencies,
         init_checkpointer_async,
+        init_sandbox_pool,
         seed_admin_user,
         seed_default_agents,
         setup_dev_database,
@@ -61,6 +63,7 @@ async def lifespan(app: FastAPI):
         setup_huggingface,
         submit_model_warmup,
     )
+    from src.core.container import init_container
 
     # ── 启动：Phase 1 — 配置 ────────────────────────────────
     settings = get_settings()
@@ -88,7 +91,9 @@ async def lifespan(app: FastAPI):
         logger.info("   GPU: 不可用，使用 CPU 推理")
 
     # ── 启动：Phase 2 — 工具 & 基础设施 ──────────────────────
+    await init_container(services=["tool_registry"])  # DI 容器初始化（预加载核心注册表）
     setup_harness_tools()
+    await init_sandbox_pool()  # 沙箱池预热（非阻塞，失败不影响服务）
 
     if settings.app_env != "production":
         await setup_dev_database()
@@ -112,9 +117,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"[关闭] {settings.app_name} 正在关闭...")
     await asyncio.sleep(1)  # 给 in-flight 请求缓冲时间
 
-    from src.agents.checkpointer import shutdown_checkpointer
+    from src.harness.sandbox.manager import shutdown_sandbox_manager
+    await shutdown_sandbox_manager()
 
+    from src.agents.checkpointer import shutdown_checkpointer
     await shutdown_checkpointer()
+
+    from src.core.container import shutdown_container
+    await shutdown_container()
     from src.db.session import close_db_engine
 
     await close_db_engine()
@@ -151,6 +161,7 @@ def create_app() -> FastAPI:
     )
 
     # ---- 中间件注册（顺序重要：外→内执行） ----
+    app.add_middleware(GZipMiddleware, minimum_size=500)  # 响应压缩
     setup_cors(app)
     app.add_middleware(SecurityHeadersMiddleware)   # 1. 安全头（最外层）
     app.add_middleware(RateLimitMiddleware)         # 2. 限流
@@ -199,33 +210,36 @@ def create_app() -> FastAPI:
     # ---- 路由注册 ----
     app.include_router(api_v1_router)
 
-    # ---- Scalar API 文档 ----
-    @app.get("/docs", include_in_schema=False)
-    async def scalar_docs():
-        """Scalar API 接口文档页面。"""
-        return get_scalar_api_reference(
-            openapi_url=app.openapi_url or "/openapi.json",
-            title=f"{settings.app_name} - API 接口文档",
-            dark_mode=True,
-            show_sidebar=True,
-            hide_download_button=False,
-            hide_test_request_button=False,
-            hide_models=False,
-            default_open_all_tags=True,
-        )
+    # ---- Scalar API 文档（仅非生产环境） ----
+    if settings.app_env != "production":
 
-    @app.get("/redoc", include_in_schema=False)
-    async def scalar_redoc():
-        """Scalar API 文档（备用路径）。"""
-        return get_scalar_api_reference(
-            openapi_url=app.openapi_url or "/openapi.json",
-            title=f"{settings.app_name} - API 接口文档",
-            dark_mode=True,
-            show_sidebar=True,
-        )
+        @app.get("/docs", include_in_schema=False)
+        async def scalar_docs():
+            """Scalar API 接口文档页面。"""
+            return get_scalar_api_reference(
+                openapi_url=app.openapi_url or "/openapi.json",
+                title=f"{settings.app_name} - API 接口文档",
+                dark_mode=True,
+                show_sidebar=True,
+                hide_download_button=False,
+                hide_test_request_button=False,
+                hide_models=False,
+                default_open_all_tags=True,
+            )
+
+        @app.get("/redoc", include_in_schema=False)
+        async def scalar_redoc():
+            """Scalar API 文档（备用路径）。"""
+            return get_scalar_api_reference(
+                openapi_url=app.openapi_url or "/openapi.json",
+                title=f"{settings.app_name} - API 接口文档",
+                dark_mode=True,
+                show_sidebar=True,
+            )
 
     return app
 
 
 # 应用实例（供 uvicorn 直接导入）
 app = create_app()
+

@@ -3,10 +3,16 @@ import { useParams, useSearchParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import type { ChatMode } from "@/types";
 import {
-  Send, Bot, Square, Check, ChevronDown, RefreshCw,
-  Wrench, Loader2, Download, ListChecks, FileText, Zap, MessageSquare, Brain, Workflow,
+  Send, Bot, Square, ChevronDown, RefreshCw,
+  Loader2, Download, ListChecks, FileText, Zap, MessageSquare, Brain, Workflow,
   Library, BookOpen, X, ImagePlus,
 } from "lucide-react";
+import { ThinkingCard } from "@/components/chat/thinking-card";
+import { AgentTimeline } from "@/components/chat/agent-timeline";
+import { StreamingMetrics } from "@/components/chat/streaming-metrics";
+import { ToolCallRenderer } from "@/components/chat/tool-call-renderer";
+import { ConnectionStatus } from "@/components/common/connection-status";
+import type { TimelineEntry, StreamTiming } from "@/types";
 import { cn } from "@/lib/utils";
 import * as conversationsApi from "@/api/conversations";
 import { API_BASE_URL, CONTEXT_MAX_TOKENS } from "@/lib/constants";
@@ -170,6 +176,10 @@ export default function ChatDetailPage() {
 
   // Tool calls in current stream
   const [liveToolCalls, setLiveToolCalls] = useState<ToolCall[]>([]);
+  const [timelineEntries, setTimelineEntries] = useState<TimelineEntry[]>([]);
+  const [streamTiming, setStreamTiming] = useState<StreamTiming | null>(null);
+  const [streamDone, setStreamDone] = useState(false);
+  const [connStatus, setConnStatus] = useState<"idle" | "connected" | "reconnecting" | "disconnected" | "error">("idle");
 
   // File outputs in current stream
   const [liveFiles, setLiveFiles] = useState<FileOutput[]>([]);
@@ -184,6 +194,12 @@ export default function ChatDetailPage() {
 
   // Token usage
   const [tokenUsage, setTokenUsage] = useState({ used: 0, quota: CONTEXT_MAX_TOKENS });
+  const [streamTokenUsage, setStreamTokenUsage] = useState<{
+    total_tokens?: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_cost?: number;
+  } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -345,6 +361,7 @@ export default function ChatDetailPage() {
     abortRef.current?.abort();
     abortRef.current = null;
     setIsStreaming(false);
+    setConnStatus("idle");
     if (streamContent) {
       setMessages((prev) => [...prev, {
         id: crypto.randomUUID(), role: "assistant",
@@ -353,6 +370,9 @@ export default function ChatDetailPage() {
     }
     setStreamContent("");
     setLiveToolCalls([]);
+    setTimelineEntries([]);
+    setStreamTiming(null);
+    setStreamDone(false);
     setLiveFiles([]);
     setPlanSteps([]);
   };
@@ -368,8 +388,12 @@ export default function ChatDetailPage() {
     }]);
     setInput("");
     setIsStreaming(true);
+    setConnStatus("connected");
     setStreamContent("");
     setLiveToolCalls([]);
+    setTimelineEntries([]);
+    setStreamTiming(null);
+    setStreamDone(false);
     setLiveFiles([]);
     setLiveCitations([]);
     setPlanSteps([]);
@@ -391,6 +415,10 @@ export default function ChatDetailPage() {
         id, content, controller.signal, chatMode, null, kbIdForRequest,
         imageIds.length > 0 ? imageIds : null,
       )) {
+        // Extract timing from any event
+        const timing = (event.data as Record<string, unknown>)?._timing as StreamTiming | undefined;
+        if (timing) setStreamTiming(timing);
+
         if (event.type === "plan") {
           const plan = event.data as { steps: PlanStep[]; summary: string };
           setPlanSteps(plan.steps || []);
@@ -398,6 +426,17 @@ export default function ChatDetailPage() {
         } else if (event.type === "delta") {
           full += event.data as string;
           setStreamContent(full);
+        } else if (event.type === "thinking") {
+          const thinkingData = event.data as { thinking: string; _timing?: StreamTiming };
+          setTimelineEntries((prev) => [
+            ...prev,
+            {
+              id: `thinking-${Date.now()}`,
+              type: "thinking",
+              content: thinkingData.thinking,
+              elapsed_ms: thinkingData._timing?.elapsed_ms ?? 0,
+            },
+          ]);
         } else if (event.type === "file") {
           const f = event.data as FileOutput;
           files.push(f);
@@ -405,6 +444,22 @@ export default function ChatDetailPage() {
         } else if (event.type === "tool_call") {
           const calls = event.data as ToolCall[];
           setLiveToolCalls(calls.map((tc) => ({ ...tc, status: tc.status || "running" })));
+          // Add to timeline
+          const tt = (event.data as Record<string, unknown>)?._timing as StreamTiming | undefined;
+          for (const tc of calls) {
+            setTimelineEntries((prev) => [
+              ...prev,
+              {
+                id: tc.id,
+                type: "tool_call" as const,
+                content: typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments),
+                toolName: tc.name,
+                toolArgs: tc.arguments,
+                status: "running",
+                elapsed_ms: tt?.elapsed_ms ?? 0,
+              },
+            ]);
+          }
         } else if (event.type === "rag_context") {
           const rag = event.data as { citations?: unknown[] };
           const cites = parseCitationsFromArray(rag.citations);
@@ -420,6 +475,24 @@ export default function ChatDetailPage() {
               return match ? { ...tc, result: match.result, status: "completed" } : tc;
             }),
           );
+          // Update timeline entries
+          const trTiming = (event.data as Record<string, unknown>)?._timing as StreamTiming | undefined;
+          setTimelineEntries((prev) =>
+            prev.map((entry) => {
+              const matched = results.find((r) => r.id === entry.id);
+              if (matched) {
+                return {
+                  ...entry,
+                  type: "tool_result" as const,
+                  status: matched.status === "error" ? "error" : "completed",
+                  toolResult: matched.result,
+                  content: typeof matched.result === "string" ? matched.result.substring(0, 200) : (matched.result ? JSON.stringify(matched.result).substring(0, 200) : ""),
+                  duration_ms: trTiming ? trTiming.elapsed_ms - entry.elapsed_ms : undefined,
+                };
+              }
+              return entry;
+            }),
+          );
           for (const tc of results) {
             if (tc.name === "search_knowledge_base" && typeof tc.result === "string") {
               const cites = parseKBCitations(tc.result);
@@ -432,9 +505,17 @@ export default function ChatDetailPage() {
         } else if (event.type === "done") {
           const meta = event.data as {
             conversation_id: string;
-            token_usage?: { total_tokens: number };
+            token_usage?: { total_tokens: number; total_cost?: number };
             context_usage?: ContextUsageSnapshot;
           };
+          const doneTiming = (event.data as Record<string, unknown>)?._timing as StreamTiming | undefined;
+          if (doneTiming) {
+            setStreamTiming(doneTiming);
+          }
+          setStreamDone(true);
+          if (meta.token_usage) {
+            setStreamTokenUsage(meta.token_usage);
+          }
           if (meta.context_usage) {
             setTokenUsage({
               used: meta.context_usage.used_tokens,
@@ -463,6 +544,7 @@ export default function ChatDetailPage() {
       }]);
     } finally {
       setIsStreaming(false);
+      setConnStatus("idle");
       setStreamContent("");
       setLiveToolCalls([]);
       setLiveFiles([]);
@@ -536,6 +618,12 @@ export default function ChatDetailPage() {
                 {Math.round(usagePct * 100)}%
               </span>
             </div>
+            <ConnectionStatus status={connStatus} />
+            <StreamingMetrics
+              timing={streamTiming}
+              tokenUsage={streamTokenUsage}
+              isStreaming={isStreaming}
+            />
             <div className="flex items-center gap-1">
               <span className="text-[10px] text-muted-foreground/50 font-mono">{messages.length}</span>
               <Button variant="ghost" size="sm" onClick={handleRegenerate} disabled={isStreaming}
@@ -615,6 +703,13 @@ export default function ChatDetailPage() {
               </span>
             </div>
             <PlanCard steps={planSteps} summary={planSummary} />
+          </div>
+        )}
+
+        {/* Agent timeline */}
+        {timelineEntries.length > 0 && (
+          <div className="mb-4">
+            <AgentTimeline entries={timelineEntries} isStreaming={isStreaming} />
           </div>
         )}
 
@@ -999,42 +1094,7 @@ function FileCard({ file }: { file: FileOutput }) {
 // ---- Tool Call Card ----
 
 function ToolCallCard({ toolCall }: { toolCall: ToolCall }) {
-  return (
-    <details className="rounded-lg border bg-muted/20 text-xs group">
-      <summary className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/40 select-none">
-        <span className={cn(
-          "h-1.5 w-1.5 rounded-full shrink-0",
-          toolCall.status === "running" && "bg-amber-500 animate-pulse",
-          toolCall.status === "completed" && "bg-emerald-500",
-          toolCall.status === "error" && "bg-destructive",
-        )} />
-        <Wrench className="h-3 w-3 text-muted-foreground" />
-        <code className="font-mono text-xs">{toolCall.name}</code>
-        {toolCall.status === "running" && (
-          <span className="text-muted-foreground text-[10px]">执行中...</span>
-        )}
-        {toolCall.status === "completed" && (
-          <Check className="h-3 w-3 text-emerald-500 ml-auto" />
-        )}
-      </summary>
-      <div className="px-3 py-2 border-t space-y-1.5 bg-background/50">
-        <div>
-          <span className="text-[10px] text-muted-foreground uppercase tracking-wider">参数</span>
-          <pre className="mt-0.5 bg-muted/50 px-2 py-1 rounded text-[11px] font-mono overflow-x-auto">
-            {JSON.stringify(toolCall.arguments, null, 2)}
-          </pre>
-        </div>
-        {toolCall.result !== undefined && (
-          <div>
-            <span className="text-[10px] text-muted-foreground uppercase tracking-wider">结果</span>
-            <pre className="mt-0.5 bg-muted/50 px-2 py-1 rounded text-[11px] font-mono overflow-x-auto max-h-40 overflow-y-auto leading-relaxed">
-              {typeof toolCall.result === "string" ? toolCall.result : JSON.stringify(toolCall.result, null, 2)}
-            </pre>
-          </div>
-        )}
-      </div>
-    </details>
-  );
+  return <ToolCallRenderer toolCall={toolCall} />;
 }
 
 // MessageBubble 已提取至 @/components/chat/message-bubble.tsx

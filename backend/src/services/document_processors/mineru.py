@@ -390,8 +390,8 @@ class MinerUParser:
                     from PIL import Image
                     with Image.open(BytesIO(img_bytes)) as pil_img:
                         img_width, img_height = pil_img.size
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"MinerU 图片尺寸检测失败: {e}")
 
                 blocks.append(StructuredBlock(
                     block_type="image",

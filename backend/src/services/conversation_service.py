@@ -16,6 +16,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from loguru import logger
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +24,7 @@ from src.agents.context_manager import ContextConfig, ContextManager, ContextStr
 from src.core.exceptions import ConversationNotFoundError
 from src.db.repository import BaseRepository
 from src.models.domain.conversation import Conversation, Message
+from src.services.conversation_context_store import ConversationContextStore, get_conversation_context_store
 
 
 def _orm_to_langchain_all(messages: list[Message]) -> list[BaseMessage]:
@@ -54,10 +56,15 @@ def _orm_to_langchain_all(messages: list[Message]) -> list[BaseMessage]:
 class ConversationService:
     """会话业务服务。"""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        context_store: ConversationContextStore | None = None,
+    ) -> None:
         self._conv_repo = BaseRepository[Conversation](Conversation, session)
         self._msg_repo = BaseRepository[Message](Message, session)
         self._session = session
+        self._context_store = context_store
 
     # ---- 会话 CRUD ----
 
@@ -190,6 +197,20 @@ class ConversationService:
         if conv:
             conv.message_count = (conv.message_count or 0) + 1
             await self._conv_repo.update(conv)
+
+        # 异步写入向量存储（不阻塞消息保存）
+        if self._context_store and role in ("user", "assistant"):
+            try:
+                await self._context_store.add_message(
+                    message_id=result.id,
+                    role=role,
+                    content=content,
+                    conversation_id=conversation_id,
+                    tenant_id=tenant_id,
+                    metadata=merged_meta,
+                )
+            except Exception as e:
+                logger.debug(f"向量写入失败（不阻塞主流程）: {e}")
 
         return result
 

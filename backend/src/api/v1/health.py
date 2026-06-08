@@ -75,7 +75,7 @@ async def _check_redis() -> dict[str, Any]:
 
 
 def _check_disk() -> dict[str, Any]:
-    """检查知识库数据目录的磁盘空间。"""
+    """检查知识库数据目录的磁盘空间。兼容 Windows（无 statvfs）。"""
     try:
         from src.core.config import get_settings
 
@@ -83,9 +83,17 @@ def _check_disk() -> dict[str, Any]:
         if not os.path.exists(data_dir):
             os.makedirs(data_dir, exist_ok=True)
 
-        usage = os.statvfs(data_dir)
-        total_gb = round(usage.f_frsize * usage.f_blocks / (1024**3), 1)
-        free_gb = round(usage.f_frsize * usage.f_bavail / (1024**3), 1)
+        try:
+            usage = os.statvfs(data_dir)
+            total_gb = round(usage.f_frsize * usage.f_blocks / (1024**3), 1)
+            free_gb = round(usage.f_frsize * usage.f_bavail / (1024**3), 1)
+        except AttributeError:
+            # Windows 不支持 statvfs，使用 shutil 回退
+            import shutil as _shutil
+            disk = _shutil.disk_usage(data_dir)
+            total_gb = round(disk.total / (1024**3), 1)
+            free_gb = round(disk.free / (1024**3), 1)
+
         used_pct = round((1 - free_gb / total_gb) * 100, 1) if total_gb > 0 else 0
 
         return {
@@ -93,6 +101,31 @@ def _check_disk() -> dict[str, Any]:
             "total_gb": total_gb,
             "free_gb": free_gb,
             "used_percent": used_pct,
+        }
+    except Exception as e:
+        return {"status": "unhealthy", "error": str(e)}
+
+
+async def _check_llm() -> dict[str, Any]:
+    """检查 LLM 提供商连通性（轻量测试调用）。"""
+    try:
+        from src.llm.factory import get_llm_factory
+        from langchain_core.messages import HumanMessage
+
+        factory = get_llm_factory()
+        llm = factory.create_chat_model()
+        if llm is None:
+            return {"status": "disabled", "message": "LLM 未配置"}
+
+        import time as _time
+        start = _time.perf_counter()
+        resp = await llm.ainvoke([HumanMessage(content="ping")], max_tokens=1)
+        latency = round((_time.perf_counter() - start) * 1000, 2)
+
+        return {
+            "status": "healthy",
+            "latency_ms": latency,
+            "model": getattr(llm, "model_name", "unknown"),
         }
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
@@ -128,6 +161,10 @@ async def health_check() -> APIResponse[HealthResponse]:
     # 磁盘
     disk = _check_disk()
     checks["disk"] = disk.get("status", "unknown")
+
+    # LLM 提供商
+    llm = await _check_llm()
+    checks["llm"] = llm.get("status", "unknown")
 
     # 汇总
     unhealthy = [k for k, v in checks.items() if v.startswith(("unhealthy", "error"))]

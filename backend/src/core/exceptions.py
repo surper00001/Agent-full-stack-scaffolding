@@ -54,6 +54,13 @@ class ForbiddenError(AppException):
         super().__init__(message=message, code=40300, status_code=403, detail=detail)
 
 
+class TooManyRequestsError(AppException):
+    """请求过于频繁。"""
+
+    def __init__(self, message: str = "请求过于频繁，请稍后重试", detail: Any = None) -> None:
+        super().__init__(message=message, code=42900, status_code=429, detail=detail)
+
+
 # ---- 业务异常 ----
 class TenantNotFoundError(NotFoundError):
     """租户不存在。"""

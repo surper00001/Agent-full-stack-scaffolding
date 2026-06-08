@@ -69,3 +69,7 @@ tools/
 
 # Claude
 .claude/
+tools/qdrant/qdrant.exe
+tools/docker-installer.exe
+tools/qdrant_data/
+tools/qdrant_storage/

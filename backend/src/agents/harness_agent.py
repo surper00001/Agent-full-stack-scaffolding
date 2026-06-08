@@ -27,7 +27,7 @@ from src.agents.tools.skill_tools import (
     SearchSkillsTool,
     TestSkillTool,
 )
-from src.harness.tool_registry import register_tool
+from src.harness.unified_registry import get_unified_registry
 
 # Harness Agent 系统提示词
 HARNESS_SYSTEM_PROMPT = """你是一个 **Harness Engineering Agent** — 专门负责为 AI 平台创建和安装新的能力 (Skill)。
@@ -90,7 +90,7 @@ def create_harness_agent(llm: BaseChatModel) -> BaseAgent:
     Returns:
         配置好的 Harness Agent
     """
-    # 注册 Skill 工具到 HarnessTool 注册表
+    # 注册 Skill 工具到统一注册表
     skill_tools = [
         SearchSkillsTool(),
         GenerateSkillCodeTool(),
@@ -99,11 +99,15 @@ def create_harness_agent(llm: BaseChatModel) -> BaseAgent:
         RegisterSkillTool(),
         InstallSkillTool(),
     ]
-    for tool in skill_tools:
-        register_tool(tool)
 
-    # 转为 LangChain tools
-    lc_tools = [t.to_langchain_tool() for t in skill_tools]
+    registry = get_unified_registry()
+    lc_tools: list[Any] = []
+    for tool in skill_tools:
+        # 注册 HarnessTool → 同时自动生成 LangChain 包装器
+        entry = registry.register(tool, source="skill")
+        lc = entry.get_langchain_tool()
+        if lc is not None:
+            lc_tools.append(lc)
 
     agent = BaseAgent(
         llm=llm,

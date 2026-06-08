@@ -5,7 +5,8 @@ import time
 
 import pytest
 
-from src.agents.tools.info import _kb_search_semaphore, _KB_SEARCH_TOOL_NAME
+from src.agents.tools.kb_search import _kb_search_semaphore
+from src.agents.tools.info import _KB_SEARCH_TOOL_NAME
 
 
 @pytest.mark.unit
@@ -73,4 +74,5 @@ def test_create_kb_search_tool_returns_tool() -> None:
     )
     assert tool.name == _KB_SEARCH_TOOL_NAME
     assert "测试库" in tool.description
-    assert callable(tool.func) if hasattr(tool, "func") else callable(tool)
+    # StructuredTool 可通过 .ainvoke() 调用，非直接 callable
+    assert callable(getattr(tool, "ainvoke", None)) or callable(getattr(tool, "func", None)) or callable(tool)

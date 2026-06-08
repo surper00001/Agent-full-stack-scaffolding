@@ -1,12 +1,15 @@
+import { useState, useEffect } from "react";
 import { useAuthStore, useUIStore } from "@/stores";
 import { Button } from "@/components/ui/button";
-import { Moon, Sun, LogOut, User, Palette } from "lucide-react";
+import { Moon, Sun, LogOut, User, Palette, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Link } from "react-router-dom";
+import { GlobalSearch } from "@/components/common/global-search";
 
 export function Header() {
   const { user, isAdmin, logout } = useAuthStore();
   const { theme, setTheme, colorTheme, setColorTheme } = useUIStore();
+  const [searchOpen, setSearchOpen] = useState(false);
 
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
@@ -16,9 +19,21 @@ export function Header() {
     setColorTheme(colorTheme === "emerald" ? "amber" : "emerald");
   };
 
+  // Ctrl+K keyboard shortcut for global search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   return (
     <header className="flex h-14 items-center justify-between border-b bg-background px-6">
-      <div>
+      <div className="flex items-center gap-4">
         <h2 className="text-sm font-medium text-muted-foreground">
           {isAdmin ? "ClipFlow 管理后台" : "ClipFlow"}
         </h2>
@@ -58,6 +73,20 @@ export function Header() {
           />
         </div>
 
+        {/* 全局搜索 */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setSearchOpen(true)}
+          className="gap-2 text-muted-foreground"
+        >
+          <Search className="h-4 w-4" />
+          <span className="hidden lg:inline">搜索...</span>
+          <kbd className="hidden sm:inline-flex h-5 items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
+            Ctrl+K
+          </kbd>
+        </Button>
+
         {/* 明暗切换 */}
         <Button variant="ghost" size="icon" onClick={toggleTheme}>
           {theme === "dark" ? (
@@ -88,6 +117,7 @@ export function Header() {
           <LogOut className="h-4 w-4" />
         </Button>
       </div>
+      <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   );
 }

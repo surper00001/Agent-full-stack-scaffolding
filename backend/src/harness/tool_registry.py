@@ -3,6 +3,10 @@ Skill Registry — DB-backed 工具注册表。
 
 启动时加载内置工具 + DB 中的 active Skill。
 支持运行时热加载，AI 生成的 Skill 通过此注册表接入 Agent。
+
+⚠ 此模块现在是 UnifiedToolRegistry 的薄代理层，所有实际存储由
+  src/harness/unified_registry.py 中的 UnifiedToolRegistry 管理。
+  保留现有 API 以确保向后兼容。
 """
 
 from __future__ import annotations
@@ -12,29 +16,48 @@ from typing import Any
 from loguru import logger
 
 from src.harness.tool_base import HarnessTool
+from src.harness.unified_registry import UnifiedToolRegistry, get_unified_registry
 
-# 全局工具注册表（内存缓存）
-_registry: dict[str, HarnessTool] = {}
+# ── 向后兼容的代理函数 ──
+
+
+def _get_registry() -> UnifiedToolRegistry:
+    """获取底层统一注册表。"""
+    return get_unified_registry()
 
 
 def register_tool(tool: HarnessTool) -> None:
-    """注册单个工具。"""
-    _registry[tool.name] = tool
+    """注册单个 HarnessTool。
+
+    同时也会尝试通过 tool.name 查找已有的 LangChain tool 进行合并。
+    """
+    _get_registry().register(tool, source="builtin")
 
 
 def unregister_tool(name: str) -> HarnessTool | None:
-    """注销工具。"""
-    return _registry.pop(name, None)
+    """注销工具。返回被注销的 HarnessTool 或 None。"""
+    entry = _get_registry().unregister(name)
+    if entry and entry.harness_tool is not None:
+        return entry.harness_tool
+    return None
 
 
 def get_tool(name: str) -> HarnessTool | None:
-    """按名称获取工具。"""
-    return _registry.get(name)
+    """按名称获取 HarnessTool（供 graph.py 调度使用）。"""
+    return _get_registry().get_harness_tool(name)
 
 
 def get_tool_registry() -> dict[str, HarnessTool]:
-    """获取当前完整工具注册表。"""
-    return dict(_registry)
+    """获取当前完整 HarnessTool 注册表。
+
+    注意：这里只返回有 HarnessTool 实例的工具。
+    纯 LangChain 工具不会出现在返回结果中。
+    """
+    result: dict[str, HarnessTool] = {}
+    for entry in _get_registry().list_all():
+        if entry.harness_tool is not None:
+            result[entry.name] = entry.harness_tool
+    return result
 
 
 def list_tools(
@@ -42,11 +65,16 @@ def list_tools(
     enabled_only: bool = True,
 ) -> list[HarnessTool]:
     """列出工具。"""
-    tools = list(_registry.values())
-    if category:
-        tools = [t for t in tools if t.category == category]
-    if enabled_only:
-        tools = [t for t in tools if t.is_enabled()]
+    entries = _get_registry().list_all()
+    tools: list[HarnessTool] = []
+    for entry in entries:
+        if entry.harness_tool is None:
+            continue
+        if category and entry.category != category:
+            continue
+        if enabled_only and not entry.enabled:
+            continue
+        tools.append(entry.harness_tool)
     return tools
 
 
@@ -113,7 +141,7 @@ def _skill_to_tool(skill: Any) -> HarnessTool:
     import json
     from typing import ClassVar
 
-    from pydantic import BaseModel, create_model
+    from pydantic import BaseModel, Field, create_model
 
     # 解析 input_schema → 动态创建 Pydantic Model
     if skill.input_schema:

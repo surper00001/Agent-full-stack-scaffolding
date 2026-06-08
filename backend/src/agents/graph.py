@@ -21,6 +21,7 @@ from loguru import logger
 from typing_extensions import TypedDict
 
 from src.core.config import get_settings
+from src.monitoring.tracing import get_tracer
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -112,11 +113,17 @@ class AgentGraphBuilder:
         self._execute_llm = execute_llm or plan_llm
         self._tools = tools or []
         self._system_prompt: str = "你是一个专业的视频创作 AI 助手。"
+        self._planner_prompt: str | None = None  # None=使用默认 PLANNER_SYSTEM_PROMPT
         self._checkpointer: Any = MemorySaver()
         self._enable_planning: bool = True
 
     def with_system_prompt(self, prompt: str) -> AgentGraphBuilder:
         self._system_prompt = prompt
+        return self
+
+    def with_planner_prompt(self, prompt: str | None) -> AgentGraphBuilder:
+        """设置 Planner 阶段的自定义提示词。None 则使用默认。"""
+        self._planner_prompt = prompt
         return self
 
     def with_tools(self, tools: list[Any]) -> AgentGraphBuilder:
@@ -172,70 +179,79 @@ class AgentGraphBuilder:
         plan_llm = self._plan_llm
 
         async def planner_node(state: AgentState) -> dict[str, Any]:
-            messages = state["messages"]
-            user_content = ""
-            for m in reversed(messages):
-                if isinstance(m, HumanMessage):
-                    user_content = m.content if isinstance(m.content, str) else str(m.content)
-                    break
+            tracer = get_tracer()
+            with tracer.start_as_current_span("agent.planner") as span:
+                span.set_attribute("agent.tools_count", len(self._tools))
+                messages = state["messages"]
+                user_content = ""
+                for m in reversed(messages):
+                    if isinstance(m, HumanMessage):
+                        user_content = m.content if isinstance(m.content, str) else str(m.content)
+                        break
 
-            # 构建工具列表摘要
-            tool_lines = []
-            for t in self._tools:
-                desc = (t.description or "").split("\n")[0][:120]
-                tool_lines.append(f"- **{t.name}**: {desc}")
-            tool_summary = "\n".join(tool_lines) if tool_lines else "（无可用工具）"
+                # 使用自定义 planner prompt（如果设置），否则使用默认
+                planner_template = self._planner_prompt or PLANNER_SYSTEM_PROMPT
 
-            plan_prompt = PLANNER_SYSTEM_PROMPT.format(tool_list=tool_summary)
-            plan_messages = [
-                SystemMessage(content=plan_prompt),
-                HumanMessage(content=f"用户需求：{user_content}\n\n请制定执行计划。"),
-            ]
+                # 构建工具列表摘要
+                tool_lines = []
+                for t in self._tools:
+                    desc = (t.description or "").split("\n")[0][:120]
+                    tool_lines.append(f"- **{t.name}**: {desc}")
+                tool_summary = "\n".join(tool_lines) if tool_lines else "（无可用工具）"
 
-            try:
-                from src.llm.resilience import resilient_ainvoke
+                plan_prompt = planner_template.format(tool_list=tool_summary)
+                plan_messages = [
+                    SystemMessage(content=plan_prompt),
+                    HumanMessage(content=f"用户需求：{user_content}\n\n请制定执行计划。"),
+                ]
 
-                provider = get_settings().llm_provider
-                resp = await resilient_ainvoke(
-                    plan_llm, plan_messages,
-                    provider=f"{provider}/planner",
-                    max_retries=2,  # 规划阶段快速失败
-                )
-                plan_text = resp.content if isinstance(resp.content, str) else str(resp.content)
+                try:
+                    from src.llm.resilience import resilient_ainvoke
 
-                # 解析 JSON 计划
-                import re
-                json_match = re.search(r"\[[\s\S]*\]", plan_text)
-                if json_match:
-                    plan_data = json_loads_strict(json_match.group())
-                    plan: list[PlanStep] = [
-                        PlanStep(
-                            step=item.get("step", i + 1),
-                            action=item.get("action", ""),
-                            tool=item.get("tool", ""),
-                            expected_output=item.get("expected_output", ""),
-                        )
-                        for i, item in enumerate(plan_data)
-                    ]
-                    plan_summary = "\n".join(
-                        f"  {p['step']}. [{p['tool'] or 'LLM'}] {p['action']}"
-                        for p in plan
+                    provider = get_settings().llm_provider
+                    resp = await resilient_ainvoke(
+                        plan_llm, plan_messages,
+                        provider=f"{provider}/planner",
+                        max_retries=2,  # 规划阶段快速失败
                     )
-                    logger.info(f"Plan 生成完成: {len(plan)} 步骤")
-                else:
-                    plan = []
-                    plan_summary = "（计划生成失败，将直接执行）"
-            except Exception as e:
-                logger.warning(f"Plan 生成失败: {e}")
-                plan = []
-                plan_summary = "（计划生成异常，将直接执行）"
+                    plan_text = resp.content if isinstance(resp.content, str) else str(resp.content)
 
-            return {
-                "plan": plan,
-                "plan_summary": plan_summary,
-                "current_step": 0,
-                "iteration_count": 0,
-            }
+                    # 解析 JSON 计划
+                    import re
+                    json_match = re.search(r"\[[\s\S]*\]", plan_text)
+                    if json_match:
+                        plan_data = json_loads_strict(json_match.group())
+                        plan: list[PlanStep] = [
+                            PlanStep(
+                                step=item.get("step", i + 1),
+                                action=item.get("action", ""),
+                                tool=item.get("tool", ""),
+                                expected_output=item.get("expected_output", ""),
+                            )
+                            for i, item in enumerate(plan_data)
+                        ]
+                        plan_summary = "\n".join(
+                            f"  {p['step']}. [{p['tool'] or 'LLM'}] {p['action']}"
+                            for p in plan
+                        )
+                        logger.info(f"Plan 生成完成: {len(plan)} 步骤")
+                        span.set_attribute("agent.plan_steps", len(plan))
+                    else:
+                        plan = []
+                        plan_summary = "（计划生成失败，将直接执行）"
+                        span.set_attribute("agent.plan_error", "no_json_found")
+                except Exception as e:
+                    logger.warning(f"Plan 生成失败: {e}")
+                    plan = []
+                    plan_summary = "（计划生成异常，将直接执行）"
+                    span.set_attribute("agent.plan_error", str(e)[:200])
+
+                return {
+                    "plan": plan,
+                    "plan_summary": plan_summary,
+                    "current_step": 0,
+                    "iteration_count": 0,
+                }
 
         return planner_node
 
@@ -243,172 +259,200 @@ class AgentGraphBuilder:
 
     def _make_executor_node(self, llm: BaseChatModel):
         async def executor_node(state: AgentState) -> dict[str, Any]:
-            messages = state["messages"]
-            iteration = state.get("iteration_count", 0)
-            plan = state.get("plan", [])
-            plan_summary = state.get("plan_summary", "")
-            current_step = state.get("current_step", 0)
+            tracer = get_tracer()
+            with tracer.start_as_current_span("agent.executor") as span:
+                messages = state["messages"]
+                iteration = state.get("iteration_count", 0)
+                plan = state.get("plan", [])
+                plan_summary = state.get("plan_summary", "")
+                current_step = state.get("current_step", 0)
 
-            if iteration >= self.MAX_ITERATIONS:
-                return {
-                    "messages": [AIMessage(content="已达到最大执行步骤，已终止。请简化请求后重试。")],
-                    "iteration_count": iteration + 1,
-                }
+                span.set_attribute("agent.iteration", iteration)
+                span.set_attribute("agent.current_step", current_step)
+                span.set_attribute("agent.plan_steps_total", len(plan))
 
-            # 首次执行：注入 system prompt + plan
-            if iteration == 0:
-                has_system = any(isinstance(m, SystemMessage) for m in messages)
+                if iteration >= self.MAX_ITERATIONS:
+                    span.set_attribute("agent.max_iterations_reached", True)
+                    return {
+                        "messages": [AIMessage(content="已达到最大执行步骤，已终止。请简化请求后重试。")],
+                        "iteration_count": iteration + 1,
+                    }
 
-                if not has_system:
-                    full_prompt = self._system_prompt
-                    if plan_summary:
-                        full_prompt += (
-                            f"\n\n## 执行计划\n{plan_summary}\n\n"
-                            "请按计划逐步执行。每一步完成后，如果涉及文件输出，"
-                            "务必使用 save_markdown_file 或 save_text_file 保存结果。"
-                            "如果你不确定该使用哪个工具，可以先调用 tool_search 查询。"
-                        )
-                    messages = [SystemMessage(content=full_prompt)] + messages
+                # 首次执行：注入 system prompt + plan
+                if iteration == 0:
+                    has_system = any(isinstance(m, SystemMessage) for m in messages)
 
-            # 当前步骤提示
-            if plan and current_step < len(plan):
-                step = plan[current_step]
-                step_hint = HumanMessage(
-                    content=f"【当前步骤 {step['step']}/{len(plan)}】{step['action']}"
+                    if not has_system:
+                        full_prompt = self._system_prompt
+                        if plan_summary:
+                            full_prompt += (
+                                f"\n\n## 执行计划\n{plan_summary}\n\n"
+                                "请按计划逐步执行。每一步完成后，如果涉及文件输出，"
+                                "务必使用 save_markdown_file 或 save_text_file 保存结果。"
+                                "如果你不确定该使用哪个工具，可以先调用 tool_search 查询。"
+                            )
+                        messages = [SystemMessage(content=full_prompt)] + messages
+
+                # 当前步骤提示
+                if plan and current_step < len(plan):
+                    step = plan[current_step]
+                    step_hint = HumanMessage(
+                        content=f"【当前步骤 {step['step']}/{len(plan)}】{step['action']}"
+                    )
+                    messages = list(messages) + [step_hint]
+
+                from src.llm.resilience import resilient_ainvoke
+
+                provider = get_settings().llm_provider
+                response = await resilient_ainvoke(
+                    llm, messages,
+                    provider=f"{provider}/executor",
+                    max_retries=3,
                 )
-                messages = list(messages) + [step_hint]
 
-            from src.llm.resilience import resilient_ainvoke
+                # 如果 response 没有 tool_calls 且还有后续步骤，推进步骤
+                next_step = current_step
+                has_tool_calls = (
+                    isinstance(response, AIMessage)
+                    and response.tool_calls
+                    and len(response.tool_calls) > 0
+                )
+                if not has_tool_calls and plan and current_step < len(plan):
+                    next_step = current_step + 1
 
-            provider = get_settings().llm_provider
-            response = await resilient_ainvoke(
-                llm, messages,
-                provider=f"{provider}/executor",
-                max_retries=3,
-            )
+                span.set_attribute("agent.has_tool_calls", has_tool_calls)
+                span.set_attribute("agent.next_step", next_step)
 
-            # 如果 response 没有 tool_calls 且还有后续步骤，推进步骤
-            next_step = current_step
-            has_tool_calls = (
-                isinstance(response, AIMessage)
-                and response.tool_calls
-                and len(response.tool_calls) > 0
-            )
-            if not has_tool_calls and plan and current_step < len(plan):
-                next_step = current_step + 1
-
-            return {
-                "messages": [response],
-                "iteration_count": iteration + 1,
-                "current_step": next_step,
-            }
+                return {
+                    "messages": [response],
+                    "iteration_count": iteration + 1,
+                    "current_step": next_step,
+                }
 
         return executor_node
 
-    # ---- Tool Node (流式并行调度) ----
+    # ---- Tool Node (StreamingToolExecutor 统一调度) ----
 
     def _make_tool_node(self):
-        """构建流式并行工具执行节点。
+        """构建工具执行节点。
 
-        调度规则：
-        - 只读工具之间可以并行
-        - 非并发安全的工具独占执行
-        - 非只读工具独占总线
-        - 未知工具降级到工具注册表查询
+        使用 StreamingToolExecutor 统一调度所有工具调用：
+        - AbortSignal 树：一个工具失败可取消同级
+        - 自动超时管理（默认 120s）
+        - 只读工具并行，写工具互斥，非并发安全独占
+        - HarnessTool 优先（权限检查 + 信号传播），LangChain 降级适配
         """
-        import asyncio
-
+        from src.harness.abort_signal import AbortSignal
+        from src.harness.streaming_executor import StreamingToolExecutor
         from src.harness.tool_registry import get_tool as get_harness_tool
 
-        # 构建工具名→工具对象的映射
+        # 构建工具名 → LangChain 工具映射
         tool_map: dict[str, Any] = {t.name: t for t in self._tools}
 
         async def tool_node(state: AgentState) -> dict[str, Any]:
-            messages = state["messages"]
-            last_message = messages[-1]
+            tracer = get_tracer()
+            with tracer.start_as_current_span("agent.tools") as span:
+                messages = state["messages"]
+                last_message = messages[-1]
 
-            if not (isinstance(last_message, AIMessage) and last_message.tool_calls):
-                return {"messages": []}
+                if not (isinstance(last_message, AIMessage) and last_message.tool_calls):
+                    return {"messages": []}
 
-            tool_calls = last_message.tool_calls
-            if not tool_calls:
-                return {"messages": []}
+                tool_calls = last_message.tool_calls
+                if not tool_calls:
+                    return {"messages": []}
 
-            # ── 分类工具调用 ──
-            read_only_calls: list[dict] = []       # 只读 + 并发安全 → 并行
-            write_calls: list[dict] = []            # 读写 → 独占
-            exclusive_calls: list[dict] = []        # 非并发安全 → 独占
-            unknown_calls: list[dict] = []
+                # 创建执行器（带 AbortSignal 树 — 父取消传播到所有子任务）
+                root_signal = AbortSignal(name="tool-node")
+                executor = StreamingToolExecutor(
+                    abort_signal=root_signal,
+                    max_parallel=8,
+                    default_timeout_seconds=120.0,
+                )
 
-            for tc in tool_calls:
-                tool_name = tc.get("name", "")
-                harness_tool = get_harness_tool(tool_name)
-                lc_tool = tool_map.get(tool_name)
+                # ── 提交所有工具调用，记录顺序 ──
+                # 同名工具多次调用时，用 FIFO 队列处理
+                name_call_id_map: dict[str, list[str]] = {}  # tool_name → [call_id1, call_id2, ...]
+                unknown_results: dict[str, ToolMessage] = {}  # call_id → ToolMessage
+                submitted_names: list[str] = []  # 保持提交顺序
 
-                if harness_tool is not None:
-                    # 有 HarnessTool 元数据 → 按规则分类
+                for tc in tool_calls:
+                    tool_name = tc.get("name", "")
                     tool_args = tc.get("args", {})
-                    try:
-                        input_obj = harness_tool.input_schema(**tool_args)
-                        if harness_tool.is_read_only(input_obj) and harness_tool.is_concurrency_safe(input_obj):
-                            read_only_calls.append(tc)
-                        elif not harness_tool.is_concurrency_safe(input_obj):
-                            exclusive_calls.append(tc)
+                    tc_id = tc.get("id", "")
+                    submitted_names.append(tool_name)
+
+                    harness_tool = get_harness_tool(tool_name)
+                    lc_tool = tool_map.get(tool_name)
+
+                    if harness_tool is not None:
+                        executor.submit(tool_name, tool_args)
+                        name_call_id_map.setdefault(tool_name, []).append(tc_id)
+                    elif lc_tool is not None:
+                        executor.submit_raw(
+                            tool_name=tool_name,
+                            tool_args=tool_args,
+                            execute_fn=lc_tool.ainvoke,
+                            is_read_only=False,
+                            is_concurrency_safe=False,
+                        )
+                        name_call_id_map.setdefault(tool_name, []).append(tc_id)
+                    else:
+                        unknown_results[tc_id] = ToolMessage(
+                            content=(
+                                f"工具 '{tool_name}' 未找到。"
+                                f"可用工具: {', '.join(tool_map.keys())}。"
+                                f"提示：使用 tool_search 查询可用工具。"
+                            ),
+                            tool_call_id=tc_id,
+                            name=tool_name,
+                        )
+                        logger.warning(f"未知工具调用: {tool_name}")
+
+                executor.mark_all_submitted()
+
+                # ── 等待所有结果 ──
+                all_results = await executor.wait_all()
+
+                # Set span attributes for tool execution results
+                span.set_attribute("agent.tools_submitted", len(tool_calls))
+                span.set_attribute("agent.tools_succeeded", sum(1 for r in all_results if r.success))
+                span.set_attribute("agent.tools_failed", sum(1 for r in all_results if not r.success))
+                span.set_attribute("agent.tools_unknown", len(unknown_results))
+
+                # ── 按原始调用顺序匹配结果到 tool_call_id ──
+                # 构建 name → [results_queue]（FIFO）
+                name_result_queues: dict[str, list[Any]] = {}
+                for r in all_results:
+                    name_result_queues.setdefault(r.tool_name, []).append(r)
+
+                call_results: dict[str, ToolMessage] = dict(unknown_results)
+                for tc in tool_calls:
+                    tc_id = tc.get("id", "")
+                    tool_name = tc.get("name", "")
+                    if tc_id in call_results:
+                        continue  # 已处理（未知工具）
+
+                    queue = name_result_queues.get(tool_name, [])
+                    if queue:
+                        r = queue.pop(0)  # FIFO 消费
+                        if r.success:
+                            content = str(r.output) if not isinstance(r.output, str) else r.output
                         else:
-                            write_calls.append(tc)
-                    except Exception:
-                        exclusive_calls.append(tc)  # schema 解析失败 → 安全起见独占
-                elif lc_tool is not None:
-                    # 旧版 LangChain tool → 保守策略：独占
-                    exclusive_calls.append(tc)
-                else:
-                    unknown_calls.append(tc)
+                            content = f"[工具执行失败] {r.error}"
+                        call_results[tc_id] = ToolMessage(
+                            content=content,
+                            tool_call_id=tc_id,
+                            name=tool_name,
+                        )
 
-            # ── 执行：按调度策略分组 ──
-            outputs: dict[str, ToolMessage] = {}  # tool_call_id → ToolMessage
-
-            # 1) 只读 + 并发安全 → 全部并行
-            if read_only_calls:
-                results = await asyncio.gather(
-                    *[_invoke_tool(tc, tool_map) for tc in read_only_calls],
-                    return_exceptions=True,
-                )
-                for tc, result in zip(read_only_calls, results):
-                    msg = _to_tool_message(tc, result)
-                    outputs[tc.get("id", "")] = msg
-
-            # 2) 读写工具 → 逐一执行（互斥）
-            for tc in write_calls:
-                result = await _invoke_tool(tc, tool_map)
-                outputs[tc.get("id", "")] = _to_tool_message(tc, result)
-
-            # 3) 非并发安全 → 逐一执行（互斥）
-            for tc in exclusive_calls:
-                result = await _invoke_tool(tc, tool_map)
-                outputs[tc.get("id", "")] = _to_tool_message(tc, result)
-
-            # 4) 未知工具
-            for tc in unknown_calls:
-                tool_name = tc.get("name", "")
-                result_text = (
-                    f"工具 '{tool_name}' 未找到。"
-                    f"可用工具: {', '.join(tool_map.keys())}。"
-                    f"提示：使用 tool_search 查询可用工具。"
-                )
-                logger.warning(f"未知工具调用: {tool_name}")
-                outputs[tc.get("id", "")] = ToolMessage(
-                    content=result_text,
-                    tool_call_id=tc.get("id", ""),
-                    name=tool_name,
-                )
-
-            # ── 保持原始调用顺序返回 ──
-            ordered = [
-                outputs[tc.get("id", "")]
-                for tc in tool_calls
-                if tc.get("id", "") in outputs
-            ]
-            return {"messages": ordered}
+                # ── 保持原始调用顺序返回 ──
+                ordered = [
+                    call_results[tc.get("id", "")]
+                    for tc in tool_calls
+                    if tc.get("id", "") in call_results
+                ]
+                return {"messages": ordered}
 
         return tool_node
 

@@ -160,6 +160,87 @@ class StreamingToolExecutor:
 
         return task
 
+    def submit_raw(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        execute_fn: Any,  # async callable
+        is_read_only: bool = False,
+        is_concurrency_safe: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> ToolTask:
+        """
+        提交非 HarnessTool 的原始执行任务（LangChain tool 降级路径）。
+
+        Args:
+            tool_name: 工具名（用于日志和 AbortSignal 命名）
+            tool_args: 工具参数字典
+            execute_fn: async callable — 实际执行函数
+            is_read_only: 是否只读（影响并行调度）
+            is_concurrency_safe: 是否并发安全（影响并行调度）
+            metadata: 附加元数据（如 tool_call_id），会透传到 ToolTask.meta
+        """
+        task_id = f"{tool_name}-raw-{self._submitted_count}-{id(tool_args):x}"
+
+        # 创建轻量伪 HarnessTool 用于调度
+        class _RawToolAdapter:
+            name = tool_name
+            description = ""
+            category = "raw"
+
+            def is_read_only(self, _input: Any) -> bool:
+                return is_read_only
+
+            def is_concurrency_safe(self, _input: Any) -> bool:
+                return is_concurrency_safe
+
+            def is_enabled(self) -> bool:
+                return True
+
+            def validate_input(self, _input: Any) -> Any:
+                from src.harness.tool_base import ValidationResult
+                return ValidationResult.ok()
+
+            def check_permissions(self, _input: Any) -> Any:
+                """原始工具适配器 — 权限检查委托给底层 HarnessTool。
+
+                _RawToolAdapter 作为 LangChain tool 的降级包装，
+                本身不做权限判断。实际权限检查由 LangChain tool 内部的
+                HarnessTool.check_permissions() 完成（见 tool_base.py:238）。
+                如果底层工具是纯函数（非 HarnessTool），则无法做权限控制。
+                """
+                from loguru import logger
+                from src.harness.tool_base import PermissionResult
+                logger.debug(
+                    f"RawToolAdapter 权限检查: tool={tool_name}, "
+                    f"允许执行（实际权限由底层工具控制）"
+                )
+                return PermissionResult(allowed=True)
+
+            async def execute(self, _input: Any, _signal: Any) -> Any:
+                return await execute_fn(tool_args)
+
+            def render_result(self, output: Any) -> str:
+                return str(output) if not isinstance(output, str) else output
+
+        task = ToolTask(
+            id=task_id,
+            tool=_RawToolAdapter(),  # type: ignore[arg-type]
+            input=tool_args,
+            is_read_only=is_read_only,
+            is_concurrency_safe=is_concurrency_safe,
+            abort_signal=self._abort_signal.create_child(f"task-{tool_name}"),
+        )
+
+        self._queue.append(task)
+        self._task_map[task.id] = task
+        self._submitted_count += 1
+
+        # 尝试立即调度
+        asyncio.create_task(self._try_schedule(task))
+
+        return task
+
     def submit_all(self, tool_calls: list[tuple[str, Any]]) -> list[ToolTask]:
         """批量提交工具调用。"""
         tasks = []

@@ -108,11 +108,45 @@ async def _resilient_call(
 
             circuit.record_success()
             LLM_CALL_LATENCY.labels(model=provider).observe(elapsed)
+
+            # 记录 LLM 调用到可观测性追踪器（成功）
+            try:
+                from src.services.observability_service import get_llm_tracker
+                model_name = provider
+                node_name = provider.split("/")[-1] if "/" in provider else "llm"
+                get_llm_tracker().record_sync(
+                    model=model_name,
+                    node=node_name,
+                    latency_ms=elapsed * 1000,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    success=True,
+                )
+            except Exception:
+                pass
+
             return result
 
         except Exception as e:
             last_exception = e
             circuit.record_failure()
+
+            # 记录 LLM 调用到可观测性追踪器（失败）
+            try:
+                from src.services.observability_service import get_llm_tracker
+                model_name = provider
+                node_name = provider.split("/")[-1] if "/" in provider else "llm"
+                get_llm_tracker().record_sync(
+                    model=model_name,
+                    node=node_name,
+                    latency_ms=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    success=False,
+                    error=str(e)[:200],
+                )
+            except Exception:
+                pass
 
             # 不可重试的错误直接抛出
             if not _is_retryable(e):
@@ -265,6 +299,18 @@ class CircuitBreaker:
                 f"熔断器: CLOSED → OPEN（连续失败 {self.failure_count} 次，"
                 f"等待 {self.recovery_timeout}s）"
             )
+            # 发送告警
+            try:
+                from src.monitoring.alerting import get_alert_manager
+                import asyncio as _asyncio
+                am = get_alert_manager()
+                if am._enabled:
+                    _asyncio.ensure_future(
+                        am.critical("circuit", "LLM 断路器熔断",
+                                    f"provider 断路器已打开，连续失败 {self.failure_count} 次")
+                    )
+            except Exception:
+                pass
 
 
 # ── 全局熔断器实例（按 provider） ──

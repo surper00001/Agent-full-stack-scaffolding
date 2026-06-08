@@ -1,4 +1,8 @@
-"""Meta — 工具注册表与工具发现。"""
+"""Meta — 工具注册表与工具发现。
+
+⚠ 此模块现在从 UnifiedToolRegistry 读取数据，不再维护独立的 _tool_registry。
+  保持现有 API 向后兼容，同时新增直接访问统一注册表的能力。
+"""
 
 from __future__ import annotations
 
@@ -7,34 +11,56 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-# 全局工具注册表，在模块加载时填充
-_tool_registry: dict[str, dict[str, Any]] = {}
+from src.harness.unified_registry import UnifiedToolRegistry, get_unified_registry
+
+
+def _get_registry() -> UnifiedToolRegistry:
+    """获取底层统一注册表。"""
+    return get_unified_registry()
+
+
+# ── 向后兼容的 API ──
 
 
 def register_tool_meta(t: Any) -> None:
-    """将工具元信息注册到全局注册表。"""
-    _tool_registry[t.name] = {
-        "name": t.name,
-        "description": t.description.split("\n")[0] if t.description else "",
-        "full_description": t.description or "",
-        "category": _categorize_tool(t.name),
-    }
+    """将工具元信息注册到统一注册表。
+
+    同时注册为 LangChain tool — 之后如果同名的 HarnessTool 到来，会自动合并。
+    """
+    _get_registry().register(t, source="langchain")
 
 
-def _categorize_tool(name: str) -> str:
-    cats = {
-        "calculator": "L0-基础", "current_time": "L0-基础",
-        "web_search": "L1-信息", "analyze_trending_topics": "L1-信息",
-        "generate_video_script": "L2-创作", "generate_storyboard": "L2-创作",
-        "generate_shot_list": "L2-创作",
-        "generate_mindmap": "L2-创作", "edit_mindmap": "L2-创作",
-        "fetch_url_outline": "L1-信息",
-        "save_markdown_file": "L3-输出", "save_text_file": "L3-输出",
-        "save_srt_subtitle": "L3-输出",
-        "export_mindmap": "L3-输出",
-        "tool_search": "Meta",
-    }
-    return cats.get(name, "Unknown")
+def get_tool_registry() -> dict[str, dict[str, Any]]:
+    """获取工具注册表元数据（供 Agent 和 tool_search 使用）。"""
+    return _get_registry().get_meta_registry()
+
+
+def get_default_tools() -> list[Any]:
+    """获取 Agent 默认加载的完整 LangChain 工具列表。"""
+    return _get_registry().get_langchain_tools()
+
+
+def get_tools_by_category(category: str) -> list[Any]:
+    """按分类获取 LangChain 工具。"""
+    entries = _get_registry().list_by_category(category)
+    tools: list[Any] = []
+    for entry in entries:
+        lc_tool = entry.get_langchain_tool()
+        if lc_tool is not None:
+            tools.append(lc_tool)
+    return tools
+
+
+def _init_registry(tools: list[Any]) -> None:
+    """初始化工具注册表（由 __init__.py 调用）。
+
+    将 LangChain 工具批量注册到统一注册表。
+    """
+    count = _get_registry().register_batch(tools, source="langchain")
+    return count  # 无返回值，但供日志使用
+
+
+# ── tool_search 工具 ──
 
 
 @tool
@@ -45,63 +71,34 @@ def tool_search(query: str = "", category: str = "") -> str:
 
     Args:
         query: 搜索关键词（模糊匹配工具名和描述），留空返回全部
-        category: 分类过滤 — L0-基础/L1-信息/L2-创作/L3-输出
+        category: 分类过滤 — L0-基础/L1-信息/L2-创作/L3-输出/Meta
     """
-    results = []
-    for name, meta in _tool_registry.items():
-        if name == "tool_search":
-            continue
-        q = query.lower()
-        if q and q not in name.lower() and q not in meta["description"].lower():
-            continue
-        if category and meta["category"] != category:
-            continue
-        results.append({
-            "name": meta["name"],
-            "description": meta["description"],
-            "category": meta["category"],
-        })
+    results = _get_registry().search(query=query, category=category)
 
     if not results:
         return json.dumps({
             "message": f"未找到匹配 '{query}' 的工具",
-            "all_categories": ["L0-基础", "L1-信息", "L2-创作", "L3-输出"],
+            "all_categories": _get_registry().get_categories(),
             "hint": "尝试 tool_search(query='') 查看全部工具",
         }, ensure_ascii=False)
 
     return json.dumps({
         "query": query or "(全部)",
         "count": len(results),
-        "tools": results,
+        "tools": [
+            {
+                "name": r["name"],
+                "description": r["description"],
+                "category": r["category"],
+            }
+            for r in results
+        ],
     }, ensure_ascii=False, indent=2)
 
 
-
+# ── 保留 _ALL_TOOLS 兼容引用（静态模块级列表，初始化时使用） ──
 
 _ALL_TOOLS: list[Any] = []
-
-
-def get_default_tools() -> list[Any]:
-    """获取 Agent 默认加载的完整工具列表。"""
-    return list(_ALL_TOOLS)
-
-
-def get_tool_registry() -> dict[str, dict[str, Any]]:
-    """获取工具注册表（供 Agent 和 ToolNode 使用）。"""
-    return dict(_tool_registry)
-
-
-def get_tools_by_category(category: str) -> list[Any]:
-    """按分类获取工具。"""
-    return [t for t in _ALL_TOOLS if _categorize_tool(t.name) == category]
-
-
-def _init_registry(tools: list[Any]) -> None:
-    """初始化工具注册表（由 __init__.py 调用）。"""
-    global _ALL_TOOLS
-    _ALL_TOOLS = list(tools)
-    for t in tools:
-        register_tool_meta(t)
 
 
 __all__ = [

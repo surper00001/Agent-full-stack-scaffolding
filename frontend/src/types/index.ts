@@ -15,6 +15,9 @@ export type {
   SendMessageRequest,
   StreamEvent,
   StreamEventType,
+  StreamTiming,
+  ThinkingEvent,
+  TimelineEntry,
   TokenUsageStats,
   ToolCall,
 } from "./conversation";

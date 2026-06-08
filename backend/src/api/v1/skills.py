@@ -150,7 +150,7 @@ async def test_skill(
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[SkillTestResult]:
     _validate_skill_id(skill_id)
-    from src.harness.sandbox.manager import SandboxManager
+    from src.harness.sandbox.manager import get_sandbox_manager
 
     service = SkillService(db)
     skill = await service.get(skill_id, tenant_id)
@@ -163,22 +163,18 @@ async def test_skill(
         f"print(json.dumps(result, ensure_ascii=False))\n"
     )
 
-    manager = SandboxManager()
-    await manager.start()
-    try:
-        result = await manager.execute_code(test_code, timeout=body.timeout_seconds)
-        return APIResponse(
-            message="测试完成",
-            data=SkillTestResult(
-                success=result.success,
-                output=result.stdout.strip() if result.success else None,
-                error=(result.stderr or result.stdout) if not result.success else None,
-                duration_ms=result.duration_ms,
-                sandbox_logs=None,
-            ),
-        )
-    finally:
-        await manager.shutdown()
+    manager = get_sandbox_manager()
+    result = await manager.execute_code(test_code, timeout=body.timeout_seconds)
+    return APIResponse(
+        message="测试完成",
+        data=SkillTestResult(
+            success=result.success,
+            output=result.stdout.strip() if result.success else None,
+            error=(result.stderr or result.stdout) if not result.success else None,
+            duration_ms=result.duration_ms,
+            sandbox_logs=None,
+        ),
+    )
 
 
 @router.post("/{skill_id}/publish", response_model=APIResponse[SkillDetail], summary="发布 Skill")

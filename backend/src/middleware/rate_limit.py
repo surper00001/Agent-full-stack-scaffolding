@@ -19,6 +19,7 @@ import time
 from typing import TYPE_CHECKING
 
 from fastapi.responses import JSONResponse as FastAPIJSONResponse
+from loguru import logger
 from starlette.middleware.base import BaseHTTPMiddleware
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ _LIMITS: dict[str, tuple[int, int]] = {
     "/api/v1/auth/login": (5, 60),
     "/api/v1/auth/register": (5, 60),
     "/api/v1/auth/send-code": (3, 60),
+    "/api/v1/auth/captcha": (5, 60),      # 防止验证码滥用
     "/api/v1/auth/refresh": (20, 60),
     "/api/v1/admin": (30, 60),
 }
@@ -90,8 +92,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 pipe.zadd(rate_key, {str(now): now})
                 pipe.expire(rate_key, window_sec * 2)
                 _, count, _, _ = await pipe.execute()
-        except Exception:
-            # Redis 操作异常，fail-open
+        except Exception as e:
+            # Redis 操作异常，fail-open（避免因 Redis 故障阻塞所有流量）
+            logger.warning(f"限流 Redis 操作失败，fail-open: {e}")
             return await call_next(request)
 
         if count >= max_req:

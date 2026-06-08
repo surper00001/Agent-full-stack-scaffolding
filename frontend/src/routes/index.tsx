@@ -23,6 +23,7 @@ const AdminUserDetailPage = lazy(() => import("@/pages/admin/users/[id]"));
 const AdminSkillsPage = lazy(() => import("@/pages/admin/skills"));
 const AdminSkillDetailPage = lazy(() => import("@/pages/admin/skills/[id]"));
 const AdminSkillNewPage = lazy(() => import("@/pages/admin/skills/new"));
+const ObservabilityDashboardPage = lazy(() => import("@/pages/admin/observability"));
 const LoginPage = lazy(() => import("@/pages/login"));
 const RegisterPage = lazy(() => import("@/pages/register"));
 const NotFoundPage = lazy(() => import("@/pages/not-found"));
@@ -64,6 +65,7 @@ export function AppRoutes() {
           {/* 管理员 — 管理后台布局 */}
           <Route element={<AdminGuard />}>
             <Route path="admin" element={<AdminDashboardPage />} />
+            <Route path="admin/observability" element={<ObservabilityDashboardPage />} />
             <Route path="admin/agents" element={<AdminAgentsPage />} />
             <Route path="admin/agents/:id" element={<AdminAgentDetailPage />} />
             <Route path="admin/conversations" element={<AdminConversationsPage />} />

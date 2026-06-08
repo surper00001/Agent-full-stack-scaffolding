@@ -2,7 +2,7 @@
 CORS 中间件配置。
 
 根据应用环境自动调整允许的源，
-开发环境开放所有源，生产环境仅允许白名单域名。
+开发环境开放所有源，生产环境从 CORS_ALLOWED_ORIGINS 环境变量加载白名单。
 """
 
 from fastapi import FastAPI
@@ -16,11 +16,14 @@ def setup_cors(app: FastAPI) -> None:
     settings = get_settings()
 
     if settings.app_env == "production":
-        # 生产环境：仅允许白名单（按需配置）
-        origins = [
-            "https://your-app.com",
-            "https://admin.your-app.com",
-        ]
+        # 生产环境：从环境变量加载白名单
+        import os
+
+        origins_raw = os.getenv("CORS_ALLOWED_ORIGINS", "")
+        origins = [o.strip() for o in origins_raw.split(",") if o.strip()]
+        if not origins:
+            # 未配置时拒绝跨域（安全优先）
+            origins = []
     else:
         # 开发环境：开放所有源
         origins = ["*"]

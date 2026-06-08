@@ -77,7 +77,7 @@ export interface CursorMessagesResponse {
 }
 
 /** 流式事件类型 */
-export type StreamEventType = "delta" | "tool_call" | "tool_result" | "plan" | "file" | "rag_context" | "done" | "error";
+export type StreamEventType = "delta" | "tool_call" | "tool_result" | "plan" | "file" | "rag_context" | "done" | "error" | "thinking";
 
 /** 流式事件 */
 export interface StreamEvent {
@@ -118,6 +118,33 @@ export interface KBCitation {
   image_description?: string;
   image_caption?: string;
   ocr_status?: string;
+}
+
+/** 流式事件增强：所有事件都带 _timing */
+export interface StreamTiming {
+  elapsed_ms: number;
+  ttft_ms?: number | null;
+  tokens_per_second?: number;
+  total_elapsed_ms?: number;
+}
+
+/** 思考过程事件 */
+export interface ThinkingEvent {
+  thinking: string;
+  _timing?: StreamTiming;
+}
+
+/** Agent 时间线条目 */
+export interface TimelineEntry {
+  id: string;
+  type: "thinking" | "tool_call" | "tool_result" | "text";
+  content: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  toolResult?: unknown;
+  status?: "running" | "completed" | "error";
+  elapsed_ms: number;
+  duration_ms?: number;
 }
 
 /** KB 搜索结果（来自 search_knowledge_base 工具） */

@@ -1,4 +1,4 @@
-"""
+﻿"""
 应用核心配置模块。
 
 使用 pydantic-settings 从 .env 文件和环境变量中加载配置，
@@ -6,9 +6,9 @@
 """
 
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
     app_secret_key: SecretStr = Field(
-        default=SecretStr("change-me"), alias="APP_SECRET_KEY"
+        default=SecretStr("change-me"), alias="APP_SECRET_KEY",
+        description="应用密钥（已弃用，保留用于启动校验）",
     )
 
     # ---- 数据库 ----
@@ -105,6 +106,16 @@ class Settings(BaseSettings):
         default="langfuse", alias="MONITORING_PROVIDER"
     )
 
+    # ---- 告警 ----
+    alert_enabled: bool = Field(
+        default=False, alias="ALERT_ENABLED",
+        description="是否启用 Webhook 告警",
+    )
+    alert_webhook_url: str = Field(
+        default="", alias="ALERT_WEBHOOK_URL",
+        description="告警 Webhook 地址（Slack/Discord/自定义）",
+    )
+
     # LangFuse（开源 LLM 监测平台）
     langfuse_public_key: str | None = Field(
         default=None, alias="LANGFUSE_PUBLIC_KEY"
@@ -134,7 +145,8 @@ class Settings(BaseSettings):
     # ---- Agent ----
     agent_max_iterations: int = Field(default=15, alias="AGENT_MAX_ITERATIONS")
     agent_max_execution_time: int = Field(
-        default=300, alias="AGENT_MAX_EXECUTION_TIME"
+        default=300, alias="AGENT_MAX_EXECUTION_TIME",
+        description="[已弃用] Agent 最长执行时间（秒），暂未接入调度器",
     )
 
     # Plan 模型（可独立选择推理能力更强的模型做规划）
@@ -170,6 +182,17 @@ class Settings(BaseSettings):
         description="多模态图像理解模型名称",
     )
 
+    # ---- 文件工具安全 ----
+    file_tool_workspace_dir: str = Field(
+        default=".", alias="FILE_TOOL_WORKSPACE_DIR",
+        description="文件工具允许操作的根目录（绝对路径或相对于项目根），所有文件读写必须在此目录内",
+    )
+    file_tool_allowed_dirs: list[str] = Field(
+        default_factory=lambda: [],
+        alias="FILE_TOOL_ALLOWED_DIRS",
+        description="文件工具额外允许访问的目录列表（如 /tmp、共享数据目录）",
+    )
+
     # ---- 文件输出 ----
     file_output_dir: str = Field(
         default="./data/outputs", alias="FILE_OUTPUT_DIR",
@@ -177,7 +200,7 @@ class Settings(BaseSettings):
     )
     file_download_url_prefix: str = Field(
         default="/api/v1/files", alias="FILE_DOWNLOAD_URL_PREFIX",
-        description="文件下载 URL 前缀",
+        description="[已弃用] 文件下载 URL 前缀，暂未使用",
     )
 
     # ---- 上下文管理 ----
@@ -223,6 +246,14 @@ class Settings(BaseSettings):
     )
     jwt_refresh_token_expire_days: int = Field(
         default=7, alias="JWT_REFRESH_TOKEN_EXPIRE_DAYS"
+    )
+    jwt_additional_keys: str = Field(
+        default="",
+        alias="JWT_ADDITIONAL_KEYS",
+        description=(
+            "密钥轮换用 — JSON 数组，格式: "
+            '[{"kid": "key-2026-01", "key": "old-secret-here"}, ...]'
+        ),
     )
 
     # ---- 验证码 ----
@@ -342,7 +373,7 @@ class Settings(BaseSettings):
     )
     mineru_enable_table_recognition: bool = Field(
         default=True, alias="MINERU_ENABLE_TABLE_RECOGNITION",
-        description="MinerU 是否启用表格识别",
+        description="[已弃用] MinerU 表格识别开关，当前始终启用",
     )
     kb_page_ocr_fallback: bool = Field(
         default=True, alias="KB_PAGE_OCR_FALLBACK",
@@ -427,7 +458,7 @@ class Settings(BaseSettings):
         description="默认管理员用户名",
     )
     admin_password: SecretStr = Field(
-        default=SecretStr("Tt149212!!!"), alias="ADMIN_PASSWORD",
+        default=SecretStr(""), alias="ADMIN_PASSWORD",
         description="默认管理员密码（仅首次启动创建时使用）",
     )
     admin_email: str = Field(
@@ -437,6 +468,62 @@ class Settings(BaseSettings):
 
     # ---- 辅助 ----
     default_tenant_id: str = "default"
+
+    @model_validator(mode="after")
+    def _validate_secrets(self) -> Any:
+        """启动时校验关键安全配置，防止使用默认值部署到生产。"""
+        import secrets
+        from loguru import logger
+
+        warnings: list[str] = []
+
+        # 1. JWT 密钥校验
+        jwt_val = self.jwt_secret_key.get_secret_value()
+        if jwt_val == "change-me-jwt-secret-at-least-32-chars":
+            if self.app_env == "production":
+                raise ValueError(
+                    "生产环境必须设置 JWT_SECRET_KEY 环境变量，不能使用默认值"
+                )
+            new_key = secrets.token_hex(32)
+            object.__setattr__(self, "jwt_secret_key", SecretStr(new_key))
+            logger.warning("已自动生成 JWT_SECRET_KEY（开发环境随机值）")
+
+
+        # 2. 管理员密码校验
+        admin_val = self.admin_password.get_secret_value()
+        if not admin_val:
+            if self.app_env == "production":
+                raise ValueError("生产环境必须设置 ADMIN_PASSWORD 环境变量")
+            new_pw = secrets.token_urlsafe(16)
+            object.__setattr__(self, "admin_password", SecretStr(new_pw))
+            logger.warning("已自动生成 ADMIN_PASSWORD（开发环境随机值）")
+        elif len(admin_val) < 8:
+            if self.app_env == "production":
+                raise ValueError("生产环境 ADMIN_PASSWORD 长度必须 >= 8")
+            logger.warning("ADMIN_PASSWORD 长度不足 8 位，请修改")
+
+        # 3. APP_SECRET_KEY 校验
+        app_sec = self.app_secret_key.get_secret_value()
+        if app_sec == "change-me" and self.app_env == "production":
+            raise ValueError(
+                "生产环境必须设置 APP_SECRET_KEY 环境变量"
+            )
+
+        # 4. LLM API Key 缺失警告
+        key_map = {
+            "deepseek": "deepseek_api_key",
+            "openai": "openai_api_key",
+            "anthropic": "anthropic_api_key",
+        }
+        provider_key = key_map.get(self.llm_provider, "")
+        if provider_key:
+            key_val = getattr(self, provider_key, None)
+            if key_val and not key_val.get_secret_value():
+                logger.warning(
+                    f"LLM 提供商为 {self.llm_provider} 但 {provider_key.upper()} 未设置"
+                )
+
+        return self
 
     @property
     def database_url(self) -> str:
@@ -467,3 +554,5 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """获取缓存的全局配置实例（单例模式）。"""
     return Settings()
+
+

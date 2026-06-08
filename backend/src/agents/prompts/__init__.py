@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 from src.agents.prompts.creative_advisor import CREATIVE_ADVISOR_PROMPT
 from src.agents.prompts.general_agent import GENERAL_AGENT_PROMPT
 from src.agents.prompts.mindmap_agent import MINDMAP_SYSTEM_PROMPT
+from src.agents.prompts.resume_writer import RESUME_WRITER_PROMPT
 
 __all__ = [
     "CREATIVE_ADVISOR_PROMPT",
     "GENERAL_AGENT_PROMPT",
     "MINDMAP_SYSTEM_PROMPT",
+    "RESUME_WRITER_PROMPT",
     "get_prompt_for_agent",
 ]
 
@@ -17,6 +21,8 @@ _AGENT_PROMPTS: dict[str, str] = {
     "creative": CREATIVE_ADVISOR_PROMPT,
     "creative_director": CREATIVE_ADVISOR_PROMPT,
     "mindmap": MINDMAP_SYSTEM_PROMPT,
+    "resume_writer": RESUME_WRITER_PROMPT,
+    "resume": RESUME_WRITER_PROMPT,
 }
 
 

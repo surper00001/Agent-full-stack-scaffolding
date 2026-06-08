@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pyotp
+from loguru import logger
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -97,18 +98,22 @@ class AuthService:
             is_verified=True,
             tenant_id=tenant_id,
         )
-        return await self._user_repo.create(user)
+        result = await self._user_repo.create(user)
+        logger.info(f"用户注册: user_id={result.id}, username={username}, tenant={tenant_id}")
+        return result
 
     async def _check_unique(
         self, username: str, phone: str | None, email: str | None, tenant_id: str,
     ) -> None:
-        """检查用户名、手机号、邮箱是否已被注册（租户范围内唯一）。"""
+        """检查用户名、手机号、邮箱是否已被注册（租户范围内唯一）。
+        使用通用错误消息防止用户枚举攻击。
+        """
         if await self._get_by_username(username, tenant_id):
-            raise UserAlreadyExistsError("用户名", username)
+            raise UserAlreadyExistsError("该账号信息已被注册")
         if phone and await self._get_by_phone(phone, tenant_id):
-            raise UserAlreadyExistsError("手机号", phone)
+            raise UserAlreadyExistsError("该账号信息已被注册")
         if email and await self._get_by_email(email, tenant_id):
-            raise UserAlreadyExistsError("邮箱", email)
+            raise UserAlreadyExistsError("该账号信息已被注册")
 
     # ---- 登录（双 Token） ----
 
@@ -116,14 +121,18 @@ class AuthService:
         """用户登录：先验图形验证码 → 再验凭证 → 签发双 Token。"""
         if code:
             if not await self._verify_code(account, "captcha", code):
+                logger.warning(f"登录失败（验证码错误）: account={account}")
                 raise InvalidVerificationCodeError()
 
         user = await self._find_by_account(account)
         if user is None or not verify_password(password, user.hashed_password):
+            logger.warning(f"登录失败（凭证错误）: account={account}")
             raise InvalidCredentialsError()
         if not user.is_active:
+            logger.warning(f"登录失败（账户禁用）: account={account}, user_id={user.id}")
             raise InvalidCredentialsError()
 
+        logger.info(f"登录成功: user_id={user.id}, username={user.username}")
         return await self._issue_tokens(user)
 
     async def _issue_tokens(self, user: User) -> dict:
@@ -172,11 +181,13 @@ class AuthService:
         token_record = result.scalar_one_or_none()
 
         if token_record is None or token_record.is_expired:
+            logger.warning("Token 刷新失败（无效或已过期）")
             raise InvalidCredentialsError()
 
         # 撤销旧 Refresh Token（防止重放攻击）
         token_record.is_revoked = True
         await self._session.flush()
+        logger.info(f"Token 刷新成功: user_id={token_record.user_id}")
 
         # 获取用户
         user = await self._user_repo.get_by_id(token_record.user_id)

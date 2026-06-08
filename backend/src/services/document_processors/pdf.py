@@ -36,7 +36,8 @@ class PDFMixin:
             contents = page.get_contents()
             if not contents:
                 return results
-        except Exception:
+        except Exception as e:
+            logger.debug(f"获取页面内容失败: {e}")
             return results
 
         seen: set[int] = set()
@@ -50,7 +51,8 @@ class PDFMixin:
 
             try:
                 obj_str = doc.xref_object(xref)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"xref 对象解析失败 xref={xref}: {e}")
                 continue
 
             if "/Subtype/Image" in obj_str.replace(" ", ""):
@@ -130,8 +132,9 @@ class PDFMixin:
                                 reordered.append(block)
                                 seen_ids.add(i)
                                 break
-            except Exception:
+            except Exception as e:
                 # 回退到 y 坐标排序
+                logger.debug(f"精确排序失败，回退 y 坐标排序: {e}")
                 reordered.extend(
                     sorted(pb, key=lambda b: b.bbox[1] if b.bbox else 999999)
                 )
@@ -197,7 +200,8 @@ class PDFMixin:
             try:
                 tb = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks", [])
                 page_text_blocks[page_num + 1] = tb
-            except Exception:
+            except Exception as e:
+                logger.debug(f"第{page_num+1}页文本块提取失败: {e}")
                 page_text_blocks[page_num + 1] = []
         doc.close()
 
@@ -505,7 +509,8 @@ class PDFMixin:
             found_table_objs = page.find_tables(
                 table_settings=self._TABLE_SETTINGS_THREE_LINE
             ) or []
-        except Exception:
+        except Exception as e:
+            logger.debug(f"三线表检测失败，回退通用检测: {e}")
             with contextlib.suppress(Exception):
                 found_table_objs = page.find_tables() or []
 
@@ -516,7 +521,8 @@ class PDFMixin:
                     if settings is None
                     else page.extract_tables(table_settings=settings)
                 ) or []
-            except Exception:
+            except Exception as e:
+                logger.debug(f"表格提取失败 [{_name}]: {e}")
                 continue
             for table_data in raw:
                 if not self._is_valid_table(table_data):
@@ -531,8 +537,8 @@ class PDFMixin:
                         tb = found_table_objs[len(results)]
                         bbox = (tb.bbox[0], tb.bbox[1], tb.bbox[2], tb.bbox[3])
                         pdfplumber_table = tb
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"表格 bbox 提取失败: {e}")
                 results.append({
                     "data": table_data,
                     "bbox": bbox,
@@ -605,7 +611,8 @@ class PDFMixin:
                     chunk = cropped.extract_text() if cropped else ""
                     if chunk and chunk.strip():
                         results.append((chunk.strip(), region))
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"OCR 区域文本提取失败 region={region}: {e}")
                     continue
             return results
         except Exception as e:
@@ -1081,74 +1088,7 @@ def _best_font_for_block(
 
 
 # ── 公式检测启发式 ──────────────────────────────────────────
+# 已提取到 src/services/document_processors/formula_utils.py
+# 保留兼容别名，避免破坏现有 import 路径
 
-# Unicode 数学符号区域
-_MATH_UNICODE = re.compile(
-    r"[∀-⋿←-⇿⟀-⟯⦀-⧿⨀-⫿"
-    r"Α-ωϑϕϖϰϱϴϵ϶"
-    r"℀-⅏⌀-⏿■-◿☀-⛿]"
-)
-
-# LaTeX 命令
-_LATEX_CMDS = re.compile(
-    r"\\(?:frac|sum|int|prod|sqrt|lim|partial|nabla|infty|times|div|pm|mp"
-    r"|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|iota|kappa|lambda|mu|nu"
-    r"|xi|pi|rho|sigma|tau|upsilon|phi|chi|psi|omega"
-    r"|Alpha|Beta|Gamma|Delta|Epsilon|Zeta|Eta|Theta|Iota|Kappa|Lambda|Mu|Nu"
-    r"|Xi|Pi|Rho|Sigma|Tau|Upsilon|Phi|Chi|Psi|Omega"
-    r"|leq|geq|neq|approx|equiv|sim|propto|in|ni|subset|supset|subseteq"
-    r"|cup|cap|setminus|oplus|otimes|cdot|circ|bullet"
-    r"|rightarrow|leftarrow|Rightarrow|Leftarrow|leftrightarrow|mapsto"
-    r"|forall|exists|neg|wedge|vee|implies|iff"
-    r"|mathbb|mathcal|mathbf|mathit|mathrm|textrm|text|hat|bar|tilde|vec|dot|ddot"
-    r"|begin|end|left|right|middle|big|Big|bigg|Bigg"
-    r"|sin|cos|tan|cot|sec|csc|arcsin|arccos|arctan"
-    r"|log|ln|exp|det|dim|ker|deg|gcd|hom|min|max|sup|inf|Pr)"
-)
-
-# 行间公式定界符
-_DISPLAY_MATH = re.compile(r"\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]")
-_INLINE_MATH = re.compile(r"\$[^$]+?\$")
-
-
-def _is_formula_block(text: str) -> bool:
-    r"""启发式判断文本块是否包含数学公式。
-
-    检测条件（满足任一即判定为公式）：
-    1. 包含行间公式定界符 $$...$$ 或 \[...\]
-    2. LaTeX 命令密度 > 阈值
-    3. Unicode 数学符号密度 > 阈值
-    """
-    if not text or len(text) < 3:
-        return False
-
-    # 条件1: 行间公式定界符
-    if _DISPLAY_MATH.search(text):
-        return True
-
-    # 条件2+3: 符号密度
-    lines = text.split("\n")
-    for line in lines:
-        line = line.strip()
-        if len(line) < 8:
-            continue
-
-        # LaTeX 命令计数
-        latex_matches = len(_LATEX_CMDS.findall(line))
-        # Unicode 数学符号计数
-        math_chars = len(_MATH_UNICODE.findall(line))
-        # 内联数学 $$
-        inline_math = len(_INLINE_MATH.findall(line))
-
-        total_chars = len(line)
-
-        # 高密度 LaTeX（每 20 字符有 1 个命令 + 符号）
-        formula_score = latex_matches * 3 + math_chars * 2 + inline_math * 5
-        if formula_score > 0 and total_chars / max(formula_score, 1) < 15:
-            return True
-
-        # 行完全由数学符号组成（至少 30%）
-        if math_chars > 0 and math_chars / max(total_chars, 1) > 0.3:
-            return True
-
-    return False
+from src.services.document_processors.formula_utils import is_formula_block as _is_formula_block  # noqa: F401
