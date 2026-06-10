@@ -403,7 +403,7 @@ async def send_message(
     # 0. 处理图片附件：调用 VLM 描述图片，注入到用户消息文本中
     user_content = body.content
     if body.image_ids:
-        user_id = _resolve_user_id(current_user)
+        user_id = _resolve_user_id(current_user) or ""
         img_descriptions = await _resolve_image_descriptions(
             body.image_ids, user_id, conversation_id
         )

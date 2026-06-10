@@ -377,9 +377,9 @@ class AgentGraphBuilder:
                 submitted_names: list[str] = []  # 保持提交顺序
 
                 for tc in tool_calls:
-                    tool_name = tc.get("name", "")
-                    tool_args = tc.get("args", {})
-                    tc_id = tc.get("id", "")
+                    tool_name: str = tc.get("name", "")
+                    tool_args: dict[str, object] = tc.get("args", {})
+                    tc_id: str = tc.get("id", "")
                     submitted_names.append(tool_name)
 
                     harness_tool = get_harness_tool(tool_name)
