@@ -65,6 +65,7 @@ _init_registry(_ALL_TOOLS)
 # 全局注册 KBSearchHarnessTool（HarnessTool 体系）
 # 具体 KB 绑定在每次对话时通过 set_binding() 动态设置
 from src.harness.unified_registry import get_unified_registry
+
 try:
     _kb_harness = get_unified_registry().get_harness_tool("search_knowledge_base")
     if _kb_harness is None:

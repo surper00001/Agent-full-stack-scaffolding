@@ -118,6 +118,15 @@ ignore = [
     "B904",  # 允许在 except 中使用 raise from None
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"src/agents/tools/__init__.py" = ["E402"]  # 有意图的延迟导入
+"src/agents/tools/file_tools.py" = ["ARG002", "TC001"]  # 接口方法签名 + 运行时类型
+"src/agents/tools/kb_search.py" = ["ARG002", "TC001"]
+"src/agents/tools/network_tools.py" = ["ARG002", "TC001"]
+"src/agents/tools/shell_tool.py" = ["ARG002", "TC001"]
+"src/agents/tools/skill_tools.py" = ["ARG002", "TC001"]
+"src/agents/tools/info.py" = ["ARG002", "TC001"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
 

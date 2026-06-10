@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from langchain_core.tools import tool
 from loguru import logger
@@ -34,7 +34,7 @@ def calculator(expression: str) -> str:
 @tool
 def current_time() -> str:
     """获取当前 UTC 时间（ISO 格式），同时返回中文可读格式。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return json.dumps({
         "utc": now.isoformat(),
         "cn_readable": now.strftime("%Y年%m月%d日 %H:%M UTC"),

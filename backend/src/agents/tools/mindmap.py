@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import escape as xml_escape
@@ -33,12 +33,8 @@ def normalize_node_ids(
     children = node.get("children", [])
     if children:
         for i, child in enumerate(children):
-            if parent_prefix == "n0":
-                # 一级节点: n1, n2, n3...
-                child_prefix = f"n{i + 1}"
-            else:
-                # 二级+节点: n1-0, n1-1, n2-0...
-                child_prefix = f"{parent_prefix}-{i}"
+            # 一级节点: n1, n2, n3... / 二级+节点: n1-0, n1-1, n2-0...
+            child_prefix = f"n{i + 1}" if parent_prefix == "n0" else f"{parent_prefix}-{i}"
             normalize_node_ids(child, child_prefix)
     return node
 
@@ -375,7 +371,7 @@ def export_mindmap(
 
     try:
         if format == "opml":
-            now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            now_ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
             n_nodes = count_nodes(root)
             body = _to_opml(root)
             opml = (
@@ -395,7 +391,7 @@ def export_mindmap(
             mime = "text/xml"
 
         elif format == "mm":
-            now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            now_ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
             body = _to_freemind(root)
             mm_xml = (
                 '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -410,7 +406,7 @@ def export_mindmap(
         elif format == "markdown":
             n_nodes = count_nodes(root)
             n_depth = max_depth(root)
-            now_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            now_ts = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
             content = (
                 f"# {title}\n\n"
                 f"> 思维导图 · {n_nodes} 个节点 · {n_depth} 层 · 导出于 {now_ts}\n\n"
@@ -429,7 +425,7 @@ def export_mindmap(
                 **mindmap,
                 "_export": {
                     "version": "1.0",
-                    "exported_at": datetime.now(timezone.utc).isoformat(),
+                    "exported_at": datetime.now(UTC).isoformat(),
                     "format": "json",
                     "stats": {
                         "node_count": n_nodes,
@@ -569,7 +565,7 @@ def fetch_url_outline(url: str) -> str:
         parent["children"].append(new_node)
         stack.append((new_node, level))
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     result = {
         "title": page_title[:120],
         "root": root,
