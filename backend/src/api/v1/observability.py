@@ -9,7 +9,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_tenant, get_db_session
+from src.api.deps import get_current_tenant
+from src.db.session import get_db_session
 from src.services.observability_service import (
     ObservabilityService,
     get_llm_tracker,

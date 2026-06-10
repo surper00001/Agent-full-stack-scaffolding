@@ -141,13 +141,15 @@ class AgentGraphBuilder:
 
     def build(self) -> CompiledStateGraph:
         """构建 Plan + ReAct 图。"""
-        execute_llm_with_tools = self._execute_llm.bind_tools(self._tools) if self._tools else self._execute_llm
+        execute_llm = self._execute_llm
+        assert execute_llm is not None, "execute_llm must be set via with_llm()"
+        execute_llm_with_tools = execute_llm.bind_tools(self._tools) if self._tools else execute_llm
 
         workflow = StateGraph(AgentState)
 
         if self._enable_planning:
             workflow.add_node("planner", self._make_planner_node())
-            workflow.add_node("executor", self._make_executor_node(execute_llm_with_tools))
+            workflow.add_node("executor", self._make_executor_node(execute_llm_with_tools))  # type: ignore[arg-type]
             workflow.add_node("tools", self._make_tool_node())
 
             workflow.add_edge(START, "planner")
@@ -160,7 +162,7 @@ class AgentGraphBuilder:
             workflow.add_edge("tools", "executor")
         else:
             # 降级：纯 ReAct（无 Plan）
-            workflow.add_node("executor", self._make_executor_node(execute_llm_with_tools))
+            workflow.add_node("executor", self._make_executor_node(execute_llm_with_tools))  # type: ignore[arg-type]
             workflow.add_node("tools", self._make_tool_node())
 
             workflow.add_edge(START, "executor")
@@ -320,7 +322,7 @@ class AgentGraphBuilder:
                 if not has_tool_calls and plan and current_step < len(plan):
                     next_step = current_step + 1
 
-                span.set_attribute("agent.has_tool_calls", has_tool_calls)
+                span.set_attribute("agent.has_tool_calls", has_tool_calls)  # type: ignore[arg-type]
                 span.set_attribute("agent.next_step", next_step)
 
                 return {
@@ -377,9 +379,9 @@ class AgentGraphBuilder:
                 submitted_names: list[str] = []  # 保持提交顺序
 
                 for tc in tool_calls:
-                    tool_name: str = tc.get("name", "")
+                    tool_name = str(tc.get("name", ""))
                     tool_args: dict[str, object] = tc.get("args", {})
-                    tc_id: str = tc.get("id", "")
+                    tc_id = str(tc.get("id", ""))
                     submitted_names.append(tool_name)
 
                     harness_tool = get_harness_tool(tool_name)
@@ -428,8 +430,8 @@ class AgentGraphBuilder:
 
                 call_results: dict[str, ToolMessage] = dict(unknown_results)
                 for tc in tool_calls:
-                    tc_id = tc.get("id", "")
-                    tool_name = tc.get("name", "")
+                    tc_id = str(tc.get("id", ""))
+                    tool_name = str(tc.get("name", ""))
                     if tc_id in call_results:
                         continue  # 已处理（未知工具）
 
@@ -448,9 +450,9 @@ class AgentGraphBuilder:
 
                 # ── 保持原始调用顺序返回 ──
                 ordered = [
-                    call_results[tc.get("id", "")]
+                    call_results[str(tc.get("id", ""))]
                     for tc in tool_calls
-                    if tc.get("id", "") in call_results
+                    if str(tc.get("id", "")) in call_results
                 ]
                 return {"messages": ordered}
 

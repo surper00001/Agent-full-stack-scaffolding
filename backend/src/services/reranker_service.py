@@ -169,7 +169,7 @@ class RerankerService:
 
     def _lazy_init(self) -> None:
         """同步预热模型（供 lifespan 启动时调用，与 EmbeddingService 接口一致）。"""
-        self._get_backend()._ensure_loaded()  # noqa: SLF001
+        self._get_backend()._ensure_loaded()  # type: ignore[attr-defined]  # noqa: SLF001
 
     def warmup(self) -> None:
         """同步预热模型（_lazy_init 别名）。"""
@@ -210,7 +210,8 @@ class RerankerService:
             indexed.sort(key=lambda x: x[1], reverse=True)
             return indexed[:top_k]
 
-        return await loop.run_in_executor(self._executor, _run)
+        result: list[tuple[int, float]] = await loop.run_in_executor(self._executor, _run)
+        return result
 
     async def _rerank_with_pruning(
         self,
@@ -237,7 +238,11 @@ class RerankerService:
             indexed.sort(key=lambda x: x[1], reverse=True)
             return indexed
 
-        stage1 = await loop.run_in_executor(self._executor, _score_pass, first_pass)
+        from typing import cast as _cast
+        stage1: list[tuple[int, float]] = _cast(
+            "list[tuple[int, float]]",
+            await loop.run_in_executor(self._executor, _score_pass, first_pass),
+        )
 
         best_score = stage1[0][1] if stage1 else 0.0
 
@@ -254,7 +259,10 @@ class RerankerService:
             f"Reranker 第一阶段最高分={best_score:.3f} < {threshold}，"
             f"扩展第二阶段 {len(remaining)} 候选"
         )
-        stage2 = await loop.run_in_executor(self._executor, _score_pass, remaining)
+        stage2: list[tuple[int, float]] = _cast(
+            "list[tuple[int, float]]",
+            await loop.run_in_executor(self._executor, _score_pass, remaining),
+        )
 
         # 合并：stage1 索引不变，stage2 偏移 n1
         merged = stage1 + [(i + n1, s) for i, s in stage2]

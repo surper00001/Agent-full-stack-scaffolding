@@ -39,7 +39,8 @@ class _MonitoringManager:
         elif self._provider == "otel":
             self._init_otel()
         else:
-            logger.warning(f"未知的监测提供商: {self._provider}，跳过初始化")
+            # Defensive: unknown provider string from config at runtime
+            logger.warning(f"未知的监测提供商: {self._provider}，跳过初始化")  # type: ignore[unreachable]
 
         self._initialized = True
 

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """为所有响应添加安全头。"""
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
 
         headers = response.headers

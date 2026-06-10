@@ -10,9 +10,9 @@ from typing import Any, Generic, TypeVar
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db.base import Base
+from src.db.base import BaseModel
 
-ModelType = TypeVar("ModelType", bound=Base)
+ModelType = TypeVar("ModelType", bound=BaseModel)
 
 
 class BaseRepository(Generic[ModelType]):
@@ -34,9 +34,9 @@ class BaseRepository(Generic[ModelType]):
         """按主键 ID 和租户 ID 查询（多租户安全查询）。"""
         stmt = select(self._model).where(
             and_(
-                self._model.id == id_,  # type: ignore[attr-defined]
-                self._model.tenant_id == tenant_id,  # type: ignore[attr-defined]
-                self._model.is_deleted == False,  # noqa: E712  # type: ignore[attr-defined]
+                self._model.id == id_,
+                self._model.tenant_id == tenant_id,
+                self._model.is_deleted == False,  # noqa: E712
             )
         )
         result = await self._session.execute(stmt)
@@ -50,7 +50,7 @@ class BaseRepository(Generic[ModelType]):
         **filters: Any,
     ) -> list[ModelType]:
         """分页查询列表，支持按租户过滤和自定义条件。"""
-        conditions = [self._model.is_deleted == False]  # noqa: E712  # type: ignore[attr-defined]
+        conditions = [self._model.is_deleted == False]  # noqa: E712
         if tenant_id is not None:
             conditions.append(self._model.tenant_id == tenant_id)
         for field, value in filters.items():
@@ -69,7 +69,7 @@ class BaseRepository(Generic[ModelType]):
 
     async def count(self, tenant_id: str | None = None, **filters: Any) -> int:
         """统计符合条件的记录数。"""
-        conditions = [self._model.is_deleted == False]  # noqa: E712  # type: ignore[attr-defined]
+        conditions = [self._model.is_deleted == False]  # noqa: E712
         if tenant_id is not None:
             conditions.append(self._model.tenant_id == tenant_id)
         for field, value in filters.items():
@@ -98,7 +98,7 @@ class BaseRepository(Generic[ModelType]):
         instance = await self.get_by_id(id_)
         if instance is None:
             return False
-        instance.is_deleted = True  # type: ignore[attr-defined]
+        instance.is_deleted = True
         await self._session.flush()
         return True
 
@@ -126,7 +126,7 @@ class BaseRepository(Generic[ModelType]):
         stmt = delete(self._model).where(and_(*conditions))
         result = await self._session.execute(stmt)
         await self._session.flush()
-        return int(result.rowcount or 0)
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
     async def soft_delete_by_filter(
         self, tenant_id: str | None = None, **filters: Any
@@ -143,8 +143,8 @@ class BaseRepository(Generic[ModelType]):
         stmt = (
             update(self._model)
             .where(and_(*conditions))
-            .values(is_deleted=True)
+            .values({"is_deleted": True})
         )
         result = await self._session.execute(stmt)
         await self._session.flush()
-        return int(result.rowcount or 0)
+        return int(result.rowcount or 0)  # type: ignore[attr-defined]

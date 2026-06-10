@@ -119,7 +119,9 @@ class RetrievalPipeline:
                     from src.models.domain.knowledge_base import KBChunk
 
                     chunk_repo = BaseRepository[KBChunk](KBChunk, self._session)
-                    results = await self._hybrid_search.search(
+                    hs = self._hybrid_search
+                    assert hs is not None
+                    results = await hs.search(
                         kb_id=kb.id,
                         tenant_id=tenant_id,
                         query=search_query,  # 用改写后的 query 提升 BM25 召回
@@ -256,10 +258,10 @@ class RetrievalPipeline:
                     )
 
                 # 批量加载 parent chunk 上下文
-                unique_parent_ids = list({
-                    m.get("parent_chunk_id") for m in metas
-                    if m.get("parent_chunk_id")
-                })
+                unique_parent_ids = [
+                    pid for m in metas
+                    if (pid := m.get("parent_chunk_id"))
+                ]
                 if unique_parent_ids:
                     parent_map = await self._batch_load_parent_contexts(
                         unique_parent_ids, tenant_id
@@ -630,6 +632,8 @@ class RetrievalPipeline:
         groups: dict[str, list[str]] = {}
         for c in siblings:
             pid = c.parent_chunk_id
+            if pid is None:
+                continue
             if pid not in groups:
                 groups[pid] = []
             groups[pid].append(c.content)

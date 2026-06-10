@@ -11,8 +11,12 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from src.services.chunking.data_models import StructuredBlock
 
 from src.services.document_processors.layout import LayoutTag
 
@@ -60,14 +64,14 @@ class FootnoteResolver:
 
     @classmethod
     def resolve(
-        cls, blocks: list
-    ) -> list:
+        cls, blocks: list[StructuredBlock]
+    ) -> list[StructuredBlock]:
         """扫描脚注并建立正文↔脚注的链接关系。"""
         if not blocks:
             return blocks
 
         # 收集脚注/尾注块（按页码索引）
-        footnote_blocks: dict[int, list[tuple[int, object]]] = defaultdict(list)
+        footnote_blocks: dict[int, list[tuple[int, StructuredBlock]]] = defaultdict(list)
 
         for i, block in enumerate(blocks):
             tag = block.layout_tag or ""

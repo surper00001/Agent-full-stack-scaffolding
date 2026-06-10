@@ -10,6 +10,7 @@
 import json
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import bcrypt
 from jose import JWTError, jwt
@@ -70,7 +71,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> t
     return token, int((expire - datetime.now(UTC)).total_seconds())
 
 
-def decode_access_token(token: str) -> dict | None:
+def decode_access_token(token: str) -> dict[str, Any] | None:
     """解码 JWT 令牌，无效或过期返回 None。
 
     支持多密钥验证：
@@ -98,7 +99,7 @@ def decode_access_token(token: str) -> dict | None:
                     token, key, algorithms=[settings.jwt_algorithm],
                 )
                 if payload.get("type") == "access":
-                    return payload
+                    return cast("dict[str, Any]", payload)
             except JWTError:
                 continue
         return None
@@ -109,7 +110,7 @@ def decode_access_token(token: str) -> dict | None:
         )
         if payload.get("type") != "access":
             return None
-        return payload
+        return cast("dict[str, Any]", payload)
     except JWTError:
         return None
 

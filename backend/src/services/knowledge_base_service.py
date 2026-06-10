@@ -378,7 +378,7 @@ class KnowledgeBaseService:
         if doc is None:
             raise NotFoundError(f"文档不存在: {doc_id}")
 
-        doc_structure: DocStructure | None = None  # type: ignore[name-defined]
+        doc_structure: DocStructure | None = None
 
         # 获取全局信号量，确保一次只处理一个文档（MinerU + Embedding + Reranker 都是 CPU 密集）
         await _doc_process_semaphore.acquire()
@@ -423,13 +423,13 @@ class KnowledgeBaseService:
             doc.page_count = page_count
             doc.metadata_ = {
                 **(metadata or {}),
-                "doc_category": doc_structure.category.value,
-                "doc_category_label": doc_structure.extra_metadata.get("category_label", "通用"),
-                "doc_confidence": doc_structure.confidence,
-                "detected_lang": doc_structure.detected_lang,
+                "doc_category": doc_structure.category.value if doc_structure else "unknown",
+                "doc_category_label": doc_structure.extra_metadata.get("category_label", "通用") if doc_structure else "通用",
+                "doc_confidence": doc_structure.confidence if doc_structure else 0.0,
+                "detected_lang": doc_structure.detected_lang if doc_structure else "unknown",
                 "headings": [
                     {"level": h.level, "title": h.title, "page": h.page}
-                    for h in doc_structure.headings[:20]
+                    for h in (doc_structure.headings if doc_structure else [])[:20]
                 ],
             }
             await self._doc_repo.update(doc)

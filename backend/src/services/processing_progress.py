@@ -299,7 +299,8 @@ class ProcessingProgressTracker:
         if stage == ProcessStage.CANCELLED:
             return "已取消"
 
-        return STAGE_LABELS.get(stage, stage.value)
+        # All enum values are covered above; this is a safety fallback for future enum additions.
+        return STAGE_LABELS.get(stage, stage.value)  # type: ignore[unreachable]
 
     def _calc_percentage(self, entry: _TrackerEntry) -> float:
         """计算当前总体百分比。"""

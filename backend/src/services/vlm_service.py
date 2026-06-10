@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import base64
+from typing import Any
 
 from loguru import logger
 
@@ -17,6 +18,9 @@ class VLMService:
     """Qwen3-VL-Flash 多模态服务（单例）。"""
 
     _instance: VLMService | None = None
+    _client: Any = None
+    _enabled: bool = False
+    _model: str = "qwen3-vl-flash"
 
     def __new__(cls) -> VLMService:
         if cls._instance is None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import cast
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter as GRPCExporter
@@ -18,7 +19,7 @@ from opentelemetry.instrumentation.redis import RedisInstrumentor
 from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.sdk.resources import SERVICE_NAME, SERVICE_VERSION, Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
 from src.core.config import get_settings
@@ -72,10 +73,11 @@ def setup_tracing(
         )
 
         protocol = os.environ.get("OTEL_EXPORTER_PROTOCOL", "grpc")
+        exporter: SpanExporter
         if protocol == "http/protobuf":
-            exporter = HTTPExporter(endpoint=endpoint)
+            exporter = cast("SpanExporter", HTTPExporter(endpoint=endpoint))
         else:
-            exporter = GRPCExporter(endpoint=endpoint)
+            exporter = cast("SpanExporter", GRPCExporter(endpoint=endpoint))
 
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)

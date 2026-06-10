@@ -209,7 +209,7 @@ class SkillService:
             select(Skill)
             .where(
                 Skill.tenant_id == tenant_id,
-                not Skill.is_deleted,
+                Skill.is_deleted.is_(False),
                 Skill.status.in_([SkillStatus.ACTIVE.value, SkillStatus.PUBLISHED.value]),
                 (Skill.name.ilike(f"%{query}%")) | (Skill.description.ilike(f"%{query}%")),
             )

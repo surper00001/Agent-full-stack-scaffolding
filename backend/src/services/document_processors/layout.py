@@ -18,9 +18,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from src.services.chunking.data_models import StructuredBlock
 
 
 class LayoutTag(StrEnum):
@@ -386,8 +389,8 @@ _DEFAULT_INDENT_WIDTH = 24.0
 
 
 def enrich_list_structure(
-    blocks: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+    blocks: list[StructuredBlock],
+) -> list[StructuredBlock]:
     """为连续的 LIST_ITEM 块补充嵌套层级和列表类型信息。
 
     - 通过缩进检测嵌套层级（每级缩进 ~24pt）

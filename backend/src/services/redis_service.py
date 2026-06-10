@@ -46,7 +46,7 @@ class RedisService:
             logger.warning("redis-py not installed, caching disabled")
             return
         try:
-            self._client = aioredis.from_url(  # type: ignore[union-attr]
+            self._client = aioredis.from_url(
                 self._settings.redis_url,
                 encoding="utf-8",
                 decode_responses=False,
@@ -98,7 +98,8 @@ class RedisService:
         try:
             data = await self._client.get(key)
             if data:
-                return json.loads(data)
+                vec: list[float] = json.loads(data)
+                return vec
         except Exception as e:
             logger.debug("Redis get_embedding failed: {}", e)
         return None
@@ -170,7 +171,8 @@ class RedisService:
         try:
             data = await self._client.get(key)
             if data:
-                return json.loads(data)
+                cached: dict = json.loads(data)
+                return cached
         except Exception as e:
             logger.debug("Redis get_search_result failed: {}", e)
         return None
@@ -230,6 +232,6 @@ class RedisService:
                 pipe.expire(rkey, window_sec * 2)
                 _, count, _, _ = await pipe.execute()
 
-            return count < max_requests
+            return int(count) < max_requests
         except Exception:
             return True  # Allow on Redis failure

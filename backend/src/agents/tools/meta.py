@@ -56,8 +56,8 @@ def _init_registry(tools: list[Any]) -> None:
 
     将 LangChain 工具批量注册到统一注册表。
     """
-    count = _get_registry().register_batch(tools, source="langchain")
-    return count  # 无返回值，但供日志使用
+    _get_registry().register_batch(tools, source="langchain")
+    return None
 
 
 # ── tool_search 工具 ──

@@ -93,10 +93,13 @@ def _wire_pool_metrics() -> None:
     def _update_pool_gauges(pool: Pool) -> None:
         """从池状态同步 Prometheus 指标。"""
         try:
-            DB_POOL_SIZE.labels(state="checked_out").set(pool.checkedout())
-            DB_POOL_SIZE.labels(state="overflow").set(pool.overflow())
-            DB_POOL_SIZE.labels(state="total").set(pool.size())
-            ACTIVE_CONNECTIONS.labels(type="db").set(pool.checkedout())
+            checkedout = getattr(pool, "checkedout", lambda: 0)()
+            overflow = getattr(pool, "overflow", lambda: 0)()
+            size = getattr(pool, "size", lambda: 0)()
+            DB_POOL_SIZE.labels(state="checked_out").set(checkedout)
+            DB_POOL_SIZE.labels(state="overflow").set(overflow)
+            DB_POOL_SIZE.labels(state="total").set(size)
+            ACTIVE_CONNECTIONS.labels(type="db").set(checkedout)
         except Exception:
             pass  # 指标更新失败不应影响业务
 

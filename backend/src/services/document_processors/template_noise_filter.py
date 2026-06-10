@@ -72,10 +72,10 @@ def deduplicate_template_noise(blocks: list[StructuredBlock]) -> list[Structured
 
     # 阶段3: 移除噪声段并标记块
     affected_blocks = 0
-    for idx, segments in block_segments.items():
+    for idx, segment_list in block_segments.items():
         block = blocks[idx]
-        noise_segments_in_block = [
-            orig for orig, fp in segments if fp in noise_fingerprints
+        noise_segments_in_block: list[str] = [
+            orig for orig, fp in segment_list if fp in noise_fingerprints
         ]
         if not noise_segments_in_block:
             continue

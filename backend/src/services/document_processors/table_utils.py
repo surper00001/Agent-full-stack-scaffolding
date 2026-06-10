@@ -8,10 +8,22 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from src.services.chunking_service import StructuredBlock
+    from src.services.chunking.data_models import StructuredBlock
 
 
 class TableUtilsMixin:
+    _TABLE_CAPTION_RE: re.Pattern = re.compile(
+        r"(?:^|\n)\s*(?:"
+        r"表\s*\d+[^\n]{0,80}|"
+        r"Tab\.?\s*\d+[^\n]{0,80}|"
+        r"Table\s*\d+[^\n]{0,80}|"
+        r"续表[^\n]{0,40}|"
+        r"\(continued\)|"
+        r"continued\s+from\s+table"
+        r")",
+        re.IGNORECASE | re.MULTILINE,
+    )
+
     @classmethod
     def _blocks_to_full_text(cls, blocks: list[StructuredBlock]) -> str:
         """合并文本与表格内容供文档分析（中英文混合）。"""
@@ -72,9 +84,11 @@ class TableUtilsMixin:
             return None
         matches = list(cls._TABLE_CAPTION_RE.finditer(page_text))
         if table_idx < len(matches):
-            return matches[table_idx].group(0).strip()
+            caption: str = str(matches[table_idx].group(0)).strip()
+            return caption
         if matches:
-            return matches[-1].group(0).strip()
+            caption = str(matches[-1].group(0)).strip()
+            return caption
         return None
 
 
@@ -469,7 +483,7 @@ class TableUtilsMixin:
             parts.append("<tbody>")
             for i in range(header_rows, nrows):
                 row = table_data[i]
-                cells_parts: list[str] = []
+                data_cells: list[str] = []
                 for j in range(ncols):
                     if colspans and i < len(colspans) and j < len(colspans[i]) and colspans[i][j] == 0:
                         continue
@@ -481,8 +495,8 @@ class TableUtilsMixin:
                     if rowspans and i < len(rowspans) and j < len(rowspans[i]) and rowspans[i][j] > 1:
                         attrs += f' rowspan="{rowspans[i][j]}"'
                     content = str(row[j]).strip() if j < len(row) and row[j] else ""
-                    cells_parts.append(f"<td{attrs}>{content}</td>")
-                parts.append(f"<tr>{''.join(cells_parts)}</tr>")
+                    data_cells.append(f"<td{attrs}>{content}</td>")
+                parts.append(f"<tr>{''.join(data_cells)}</tr>")
             parts.append("</tbody>")
 
         parts.append("</table></div>")
@@ -658,7 +672,7 @@ class TableUtilsMixin:
         row_boundaries_set: set[float] = set()
 
         try:
-            for row_cells in table_obj.cells:
+            for row_cells in table_obj.cells:  # type: ignore[attr-defined]
                 row_bboxes: list[tuple[float, float, float, float] | None] = []
                 for cell in row_cells:
                     if cell is not None:

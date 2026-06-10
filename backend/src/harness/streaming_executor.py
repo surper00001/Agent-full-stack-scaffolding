@@ -274,7 +274,7 @@ class StreamingToolExecutor:
                     yielded += 1
                     yield ToolResult.fail(
                         name=task.tool.name,
-                        error=task.result.error if task.result else "未知错误",
+                        error=task.result.error if task.result else "未知错误",  # type: ignore[arg-type]
                     )
                 elif task.status == ToolTaskStatus.CANCELLED:
                     yielded += 1
@@ -364,7 +364,7 @@ class StreamingToolExecutor:
             start = time.perf_counter()
             try:
                 output = await asyncio.wait_for(
-                    task.tool.execute(task.input, task.abort_signal),
+                    task.tool.execute(task.input, task.abort_signal),  # type: ignore[arg-type]
                     timeout=self._default_timeout,
                 )
                 elapsed = (time.perf_counter() - start) * 1000
@@ -376,7 +376,8 @@ class StreamingToolExecutor:
                 task.status = ToolTaskStatus.DONE
                 self._completed_count += 1
             except TimeoutError:
-                task.abort_signal.abort("执行超时")
+                if task.abort_signal is not None:
+                    task.abort_signal.abort("执行超时")
                 task.result = ToolResult.fail(
                     name=task.tool.name,
                     error=f"执行超时（{self._default_timeout}s）",

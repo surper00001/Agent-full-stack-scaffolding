@@ -28,22 +28,22 @@ class TokenStatsService:
         total_stmt = (
             select(func.coalesce(func.sum(Message.token_count), 0))
             .where(
-                not Message.is_deleted,
+                Message.is_deleted.is_(False),
                 Message.created_at >= since,
             )
         )
-        total_used = int((await self._session.execute(total_stmt)).scalar_one())
+        total_used = int((await self._session.execute(total_stmt)).scalar_one() or 0)
 
         # 上期总量（用于环比）
         prev_stmt = (
             select(func.coalesce(func.sum(Message.token_count), 0))
             .where(
-                not Message.is_deleted,
+                Message.is_deleted.is_(False),
                 Message.created_at >= prev_since,
                 Message.created_at < since,
             )
         )
-        prev_used = int((await self._session.execute(prev_stmt)).scalar_one())
+        prev_used = int((await self._session.execute(prev_stmt)).scalar_one() or 0)
 
         # 环比变化百分比
         if prev_used > 0:
@@ -58,7 +58,7 @@ class TokenStatsService:
                 func.coalesce(func.sum(Message.token_count), 0).label("tokens"),
             )
             .where(
-                not Message.is_deleted,
+                Message.is_deleted.is_(False),
                 Message.created_at >= since,
             )
             .group_by(text("date"))
@@ -81,8 +81,8 @@ class TokenStatsService:
             .select_from(Message)
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(
-                not Message.is_deleted,
-                not Conversation.is_deleted,
+                Message.is_deleted.is_(False),
+                Conversation.is_deleted.is_(False),
                 Message.created_at >= since,
             )
             .group_by(Conversation.agent_type)
@@ -110,8 +110,8 @@ class TokenStatsService:
             .select_from(Message)
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(
-                not Message.is_deleted,
-                not Conversation.is_deleted,
+                Message.is_deleted.is_(False),
+                Conversation.is_deleted.is_(False),
                 Message.created_at >= since,
             )
             .order_by(Message.created_at.desc())

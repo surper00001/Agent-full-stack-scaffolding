@@ -53,7 +53,7 @@ class LLMFactory:
         else:
             raise LLMError(f"不支持的 LLM 提供商: {provider}")
 
-    def create_embeddings(self) -> Any:
+    def create_embeddings(self) -> OpenAIEmbeddings:
         """创建嵌入模型实例。
 
         DeepSeek 的 Embedding 也兼容 OpenAI API。
@@ -61,11 +61,15 @@ class LLMFactory:
         settings = self._settings
 
         if settings.llm_provider in ("deepseek", "openai"):
+            api_key = (
+                settings.openai_api_key
+                if settings.llm_provider == "openai"
+                else settings.deepseek_api_key
+            )
             return OpenAIEmbeddings(
                 model=settings.openai_embedding_model,
-                openai_api_key=settings.openai_api_key.get_secret_value()
-                or settings.deepseek_api_key.get_secret_value(),
-                openai_api_base=settings.openai_api_base
+                api_key=api_key,
+                base_url=settings.openai_api_base
                 if settings.llm_provider == "openai"
                 else settings.deepseek_api_base,
             )
@@ -73,8 +77,8 @@ class LLMFactory:
             # Anthropic 暂不提供专用 Embedding，回退到 OpenAI
             return OpenAIEmbeddings(
                 model=settings.openai_embedding_model,
-                openai_api_key=settings.openai_api_key.get_secret_value(),
-                openai_api_base=settings.openai_api_base,
+                api_key=settings.openai_api_key,
+                base_url=settings.openai_api_base,
             )
 
     def _create_deepseek_chat(
@@ -89,9 +93,9 @@ class LLMFactory:
         return ChatOpenAI(
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens or 8192,
-            openai_api_key=self._settings.deepseek_api_key.get_secret_value(),
-            openai_api_base=self._settings.deepseek_api_base,
+            max_completion_tokens=max_tokens or 8192,
+            api_key=self._settings.deepseek_api_key,
+            base_url=self._settings.deepseek_api_base,
             **kwargs,
         )
 
@@ -107,9 +111,9 @@ class LLMFactory:
         return ChatOpenAI(
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens,
-            openai_api_key=self._settings.openai_api_key.get_secret_value(),
-            openai_api_base=self._settings.openai_api_base,
+            max_completion_tokens=max_tokens,
+            api_key=self._settings.openai_api_key,
+            base_url=self._settings.openai_api_base,
             **kwargs,
         )
 
@@ -123,10 +127,10 @@ class LLMFactory:
         """创建 Anthropic Chat 模型。"""
         model = model_name or self._settings.anthropic_default_model
         return ChatAnthropic(
-            model=model,
+            model_name=model,
             temperature=temperature,
-            max_tokens=max_tokens or 4096,
-            anthropic_api_key=self._settings.anthropic_api_key.get_secret_value(),
+            max_tokens_to_sample=max_tokens or 4096,
+            api_key=self._settings.anthropic_api_key,
             **kwargs,
         )
 

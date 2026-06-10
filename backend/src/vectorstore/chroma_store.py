@@ -9,7 +9,7 @@ Chroma 向量数据库实现。
 - 预计算 query 向量检索（避免 langchain 二次 embed 路径不一致）
 """
 
-from typing import Any
+from typing import Any, cast
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -62,7 +62,7 @@ class ChromaVectorStore(BaseVectorStore):
                 host=settings.chroma_host, port=settings.chroma_port
             )
             self._store = Chroma(
-                client=client, embedding_function=embedding_function or _dummy_embedding
+                client=client, embedding_function=embedding_function or _dummy_embedding  # type: ignore[arg-type]
             )
         else:
             import os
@@ -71,7 +71,7 @@ class ChromaVectorStore(BaseVectorStore):
             os.makedirs(persist_dir, exist_ok=True)
             self._store = Chroma(
                 persist_directory=persist_dir,
-                embedding_function=embedding_function or _dummy_embedding,
+                embedding_function=embedding_function or _dummy_embedding,  # type: ignore[arg-type]
             )
 
         self._persist_dir = os.path.abspath(settings.chroma_persist_dir)
@@ -80,19 +80,19 @@ class ChromaVectorStore(BaseVectorStore):
         return f"tenant_{tenant_id}_{base_name}"
 
     def _get_client(self) -> Any:
-        return self._store._client  # type: ignore[attr-defined]
+        return self._store._client
 
     def _get_collection(self, full_collection_name: str) -> Any:
         """获取 chromadb Collection 对象。"""
         client = self._get_client()
         return client.get_or_create_collection(
             name=full_collection_name,
-            embedding_function=self._store._embedding_function,  # type: ignore[attr-defined]
+            embedding_function=self._store._embedding_function,
         )
 
     def _get_collection_store(self, full_collection_name: str) -> Chroma:
         """获取绑定到指定 collection 的 Chroma 实例。"""
-        embedding_function = self._store._embedding_function  # type: ignore[attr-defined]
+        embedding_function = self._store._embedding_function
         client = getattr(self._store, "_client", None)
         if client is not None:
             return Chroma(
@@ -193,7 +193,7 @@ class ChromaVectorStore(BaseVectorStore):
                 return None
             peek = coll.get(limit=1, include=["metadatas"])
             if peek["metadatas"]:
-                return peek["metadatas"][0].get("embedding_model")
+                return cast("str | None", peek["metadatas"][0].get("embedding_model"))
             return None
         except Exception as e:
             logger.debug(f"获取 Embedding 模型名失败 [collection={collection_name}]: {e}")
@@ -270,7 +270,7 @@ class ChromaVectorStore(BaseVectorStore):
     async def health_check(self) -> bool:
         """检查 Chroma 连接状态。"""
         try:
-            self._store._collection.count()  # type: ignore[union-attr]
+            self._store._collection.count()
             return True
         except Exception as e:
             logger.debug(f"ChromaDB 健康检查失败: {e}")

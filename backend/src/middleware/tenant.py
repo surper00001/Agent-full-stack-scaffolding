@@ -5,7 +5,8 @@
 实现透明的租户隔离。
 """
 
-from starlette.middleware.base import BaseHTTPMiddleware
+
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -21,7 +22,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
     未启用多租户时，使用默认租户 ID。
     """
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         settings = get_settings()
 
         if settings.multi_tenant_enabled:

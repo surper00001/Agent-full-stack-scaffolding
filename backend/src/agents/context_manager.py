@@ -233,6 +233,8 @@ class ContextManager:
         if system_prompt:
             result.append(SystemMessage(content=system_prompt))
 
+        # All ContextStrategy enum values are covered below
+        processed = messages  # default safety fallback
         if strategy == ContextStrategy.SLIDING_WINDOW:
             processed = self._apply_sliding_window(messages)
         elif strategy == ContextStrategy.SUMMARIZE:
@@ -241,8 +243,6 @@ class ContextManager:
             processed = await self._apply_selective(messages)
         elif strategy == ContextStrategy.HYBRID:
             processed = await self._apply_hybrid(messages)
-        else:
-            processed = messages
 
         result.extend(processed)
 

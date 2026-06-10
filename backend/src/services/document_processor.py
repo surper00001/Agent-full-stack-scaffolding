@@ -19,7 +19,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 # PaddlePaddle on Windows: 必须在任何 Paddle 导入之前禁用 OneDNN/MKL-DNN，
 # 否则 PIR 图优化阶段会报 ConvertPirAttribute2RuntimeAttribute 错误
@@ -72,7 +72,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
         from src.services.file_storage import FileStorageService as _FSS
         self._storage = file_storage or _FSS()
         self._settings = get_settings()
-        self._ocr: object | None = None
+        self._ocr: Any = None
         self._analyzer = DocumentTypeAnalyzer()
         self._save_ctx: _ImageSaveContext | None = None
         self._stored_path: str = ""
@@ -666,7 +666,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                 # 限制 PaddlePaddle CPU 线程数，避免吃满全部核心
                 try:
                     import paddle
-                    paddle.set_device("cpu")
+                    paddle.set_device("cpu")  # type: ignore[attr-defined]
                 except Exception as e:
                     logger.debug(f"Paddle 设备设置失败: {e}")
                 from paddleocr import PaddleOCR
@@ -777,7 +777,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                 table_bbox[2],
                 table_bbox[1],
             )
-            cropped = page.within_bbox(above_area)
+            cropped = page.within_bbox(above_area)  # type: ignore[attr-defined]
             if cropped:
                 text = cropped.extract_text()
                 if text and len(text.strip()) < 300:
@@ -786,7 +786,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
                         if not line:
                             continue
                         if self._TABLE_CAPTION_RE.search(line) or len(line) < 120:
-                            return line
+                            return str(line) if line else None
         except Exception as e:
             logger.debug(f"表格标题检测失败: {e}")
         return None

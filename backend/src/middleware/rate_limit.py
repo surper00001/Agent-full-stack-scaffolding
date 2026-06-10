@@ -20,12 +20,12 @@ from typing import TYPE_CHECKING
 
 from fastapi.responses import JSONResponse as FastAPIJSONResponse
 from loguru import logger
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
 
-    from fastapi import Request, Response
+    from fastapi import Request
+    from starlette.responses import Response as StarletteResponse
 
 from src.core.config import get_settings
 
@@ -54,8 +54,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """基于 Redis 滑动窗口的 API 限流中间件。"""
 
     async def dispatch(  # noqa: A003
-        self, request: Request, call_next: Callable,
-    ) -> Response:
+        self, request: Request, call_next: RequestResponseEndpoint,
+    ) -> StarletteResponse:
         settings = get_settings()
 
         # 可配置关闭限流
@@ -67,7 +67,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         except ImportError:
             return await call_next(request)
 
-        redis = get_redis_client()
+        redis = await get_redis_client()
         if redis is None:
             # Redis 不可用，fail-open 放行
             return await call_next(request)

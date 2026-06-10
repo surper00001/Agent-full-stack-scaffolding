@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.documents import Document
 from loguru import logger
@@ -250,7 +250,7 @@ class QdrantVectorStore(BaseVectorStore):
                 collection_name=full_name, limit=1, with_payload=True,
             )
             if points and points[0].payload:
-                return points[0].payload.get("embedding_model")
+                return cast("str | None", points[0].payload.get("embedding_model"))
             return None
         except Exception:
             return None
@@ -352,4 +352,4 @@ class QdrantVectorStore(BaseVectorStore):
             FieldCondition(key=k, match=MatchValue(value=v))
             for k, v in where.items()
         ]
-        return Filter(must=conditions)
+        return Filter(must=conditions)  # type: ignore[arg-type]

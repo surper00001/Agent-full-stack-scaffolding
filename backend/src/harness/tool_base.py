@@ -37,7 +37,7 @@ import json
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -235,11 +235,12 @@ class HarnessTool(ABC, Generic[Input, Output]):
             start = time.perf_counter()
             try:
                 # 权限检查
-                perm = cls().check_permissions(input_obj)
+                typed_input = cast("Input", input_obj)
+                perm = cls().check_permissions(typed_input)
                 if not perm.allowed:
                     return f"[权限拒绝] {perm.reason}"
                 # 执行
-                result = await cls().execute(input_obj, signal)
+                result = await cls().execute(typed_input, signal)
                 (time.perf_counter() - start) * 1000
                 return cls().render_result(result)
             except Exception as e:

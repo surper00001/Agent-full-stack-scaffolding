@@ -47,11 +47,10 @@ def generate_captcha(code: str) -> bytes:
     for i, ch in enumerate(code):
         bbox = measurer.textbbox((0, 0), ch, font=font)
         left, top, right, bottom = bbox
-        char_w = right - left
-        bottom - top
-        glyphs.append((ch, x - left, top, char_w))
+        char_w = int(right - left)
+        glyphs.append((ch, int(x - left), int(top), char_w))
         x += char_w + (_CHAR_GAP if i < len(code) - 1 else 0)
-        max_bottom = max(max_bottom, bottom - top)
+        max_bottom = max(max_bottom, int(bottom - top))
 
     width = x + _PADDING_X
     height = max(_CAPTCHA_HEIGHT, max_bottom + _PADDING_Y * 2)

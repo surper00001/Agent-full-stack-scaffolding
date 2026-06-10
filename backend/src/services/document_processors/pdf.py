@@ -4,26 +4,61 @@ from __future__ import annotations
 
 import contextlib
 import re
+from typing import Any
 
 from loguru import logger
 
-from src.services.chunking_service import StructuredBlock
+from src.services.chunking.data_models import StructuredBlock
 from src.services.document_processors.layout import (
     BlockTagger,
+    FontInfo,
     LayoutTag,
     ReadingOrder,
     _extract_block_text,
     analyze_document_layout,
 )
+from src.services.document_processors.table_utils import TableUtilsMixin
 from src.services.vlm_service import get_vlm_service
 
 
-class PDFMixin:
+class PDFMixin(TableUtilsMixin):
     # 在解析过程中缓存 PyMuPDF text block dict，供 _extract_page_text_regions 使用
     _page_pymupdf_blocks: dict[int, list[dict]] = {}
 
+    # ---- 以下方法/属性由 DocumentProcessor (document_processor.py) 在 MRO 中提供 ----
+
+    _settings: Any
+    _TABLE_SETTINGS_LINES: dict
+    _TABLE_SETTINGS_THREE_LINE: dict
+    _TABLE_SETTINGS_TEXT: dict
+
+    def _detect_section_title(self, text: str) -> str | None:
+        raise NotImplementedError
+
+    def _detect_table_caption(self, page: Any, table_bbox: tuple | None) -> str | None:
+        raise NotImplementedError
+
+    def _detect_image_caption(self, blocks: list[StructuredBlock], page_num: int, _img_bbox: tuple | None) -> str | None:
+        raise NotImplementedError
+
+    def _build_image_block(
+        self,
+        *,
+        page_num: int,
+        img_bytes: bytes,
+        ext: str = "png",
+        bbox: tuple[float, float, float, float] | None = None,
+        caption: str | None = None,
+        section_title: str | None = None,
+        image_path: str | None = None,
+    ) -> StructuredBlock:
+        raise NotImplementedError
+
+    def _ocr_image(self, image_bytes: bytes) -> tuple[str, str | None]:
+        raise NotImplementedError
+
     @staticmethod
-    def _deep_scan_page_images(page: object) -> list[tuple]:
+    def _deep_scan_page_images(page: Any) -> list[tuple]:
         """递归扫描 XObject 树中可能被 get_images() 遗漏的图片。
 
         page.get_images(full=True) 在嵌套 Form XObject 较深时可能遗漏。
@@ -445,7 +480,7 @@ class PDFMixin:
         # ── VLM 直提: 末尾 3 页强制用 VLM 专用 prompt 提取参考文献 ──
         # 不再依赖"是否已有 reference 标记"作为触发条件，
         # VLM 专用 prompt 直接输出结构化参考文献条目，跳过文本→分类→分块的脆弱链路
-        vlm_ref_blocks = self._vlm_extract_references(file_path, page_count, page_dimensions)
+        vlm_ref_blocks = _vlm_extract_references(file_path, page_count, page_dimensions)
         if vlm_ref_blocks:
             # VLM 专用 prompt 提取的参考文献是末尾页的权威结果，
             # 移除末尾 3 页的所有 text 块（包括已标记为 reference 的，避免重复）
@@ -489,7 +524,7 @@ class PDFMixin:
     # ---- Word 处理 ----
 
 
-    def _extract_page_tables_with_meta(self, page: object) -> list[dict]:
+    def _extract_page_tables_with_meta(self, page: Any) -> list[dict]:
         """多策略提取表格，返回 data/bbox/caption/pdfplumber_table 元信息。"""
         seen_data: list[list[list]] = []
         results: list[dict] = []
@@ -545,7 +580,7 @@ class PDFMixin:
 
         return results
 
-    def _extract_page_tables(self, page: object) -> list[list[list[str | None]]]:
+    def _extract_page_tables(self, page: Any) -> list[list[list[str | None]]]:
 
         """兼容旧接口。"""
         return [item["data"] for item in self._extract_page_tables_with_meta(page)]
@@ -553,7 +588,7 @@ class PDFMixin:
 
     def _extract_page_text_regions(
         self,
-        page: object,
+        page: Any,
         table_bboxes: list[tuple[float, float, float, float]],
     ) -> list[tuple[str, tuple[float, float, float, float]]]:
         """提取非表格区域的文本块，每个区域返回独立 (text, bbox)。
@@ -583,12 +618,12 @@ class PDFMixin:
 
         try:
             page_area = (0, 0, page.width, page.height)
-            regions: list[tuple[float, float, float, float]] = [page_area]
+            bbox_regions: list[tuple[float, float, float, float]] = [page_area]
             for bbox in sorted(table_bboxes, key=lambda b: b[1]):
                 x0, y0, x1, y1 = bbox
                 pad = 2
                 new_regions: list[tuple[float, float, float, float]] = []
-                for rx0, ry0, rx1, ry1 in regions:
+                for rx0, ry0, rx1, ry1 in bbox_regions:
                     if y1 <= ry0 or y0 >= ry1:
                         new_regions.append((rx0, ry0, rx1, ry1))
                         continue
@@ -596,10 +631,10 @@ class PDFMixin:
                         new_regions.append((rx0, ry0, rx1, min(ry1, y0 - pad)))
                     if ry1 > y1 + pad:
                         new_regions.append((rx0, max(ry0, y1 + pad), rx1, ry1))
-                regions = new_regions
+                bbox_regions = new_regions
 
             results: list[tuple[str, tuple[float, float, float, float]]] = []
-            for region in regions:
+            for region in bbox_regions:
                 w, h = region[2] - region[0], region[3] - region[1]
                 if w < 20 or h < 8:
                     continue
@@ -631,7 +666,7 @@ class PDFMixin:
         blocks: list[StructuredBlock] = []
         seen = set(existing_fps or ())
         try:
-            import camelot
+            from camelot import read_pdf as _camelot_read_pdf  # type: ignore[attr-defined]
         except ImportError:
             logger.debug("Camelot 未安装")
             return blocks
@@ -640,7 +675,7 @@ class PDFMixin:
         added = 0
         for flavor in ("stream", "lattice"):
             try:
-                camelot_tables = camelot.read_pdf(
+                camelot_tables = _camelot_read_pdf(
                     file_path, pages=pages_spec, flavor=flavor
                 )
             except Exception as e:
@@ -894,7 +929,7 @@ class PDFMixin:
 # ── Layer D: 末尾页参考文献重分类 ───────────────────────────
 
 
-def _reclassify_late_page_blocks(blocks: list, page_count: int) -> None:
+def _reclassify_late_page_blocks(blocks: list[StructuredBlock], page_count: int) -> None:
     """末尾 20% 页面的 BODY 块若含参考文献特征 → 强制标为 REFERENCE。
 
     参考文献页的整页文本块经 OCR 后，classify_block 常无法识别为 REFERENCE
@@ -971,7 +1006,7 @@ def _vlm_extract_references(
     file_path: str,
     page_count: int,
     page_dimensions: dict[str, dict[str, float]],
-) -> list:
+) -> list[StructuredBlock]:
     """VLM 专用参考文摘提取：末尾 3 页逐页渲染后让 VLM 用专用 prompt 提取。
 
     与通用 OCR 不同，这里直接要求 VLM 输出带编号的结构化参考文献，
@@ -1041,7 +1076,7 @@ def _vlm_extract_references(
 def _best_font_for_block(
     block: StructuredBlock,
     page_blocks: list[dict],
-) -> object | None:
+) -> FontInfo | None:
     """从 PyMuPDF 文本块中找出与给定 block 位置最匹配的字体信息。"""
     from src.services.document_processors.layout import FontInfo
 

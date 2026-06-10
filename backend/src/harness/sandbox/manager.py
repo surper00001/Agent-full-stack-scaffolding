@@ -177,8 +177,8 @@ class SandboxManager:
 
         # 池空，创建新的
         if len(self._in_use) < self._config.max_pool_size:
-            sandbox = await self._create_sandbox("on-demand")
-            if sandbox and sandbox.status != SandboxStatus.FAILED:
+            new_sandbox = await self._create_sandbox("on-demand")
+            if new_sandbox is not None and new_sandbox.status != SandboxStatus.FAILED:
                 return sandbox
 
         # 等待池中释放
@@ -244,9 +244,9 @@ class SandboxManager:
 
             # 补充池
             while len(self._pool) < self._config.pool_size:
-                sandbox = await self._create_sandbox("auto-replenish")
-                if sandbox:
-                    self._pool.append(sandbox)
+                replenished = await self._create_sandbox("auto-replenish")
+                if replenished is not None:
+                    self._pool.append(replenished)
                 else:
                     break
 

@@ -2,13 +2,13 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import UUID, Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy import UUID, Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.db.base import Base, UUIDPrimaryKeyMixin
+from src.db.base import BaseModel
 
 
-class RefreshToken(UUIDPrimaryKeyMixin, Base):
+class RefreshToken(BaseModel):
     """Refresh Token 表 - 用于双 Token 认证机制。"""
 
     __tablename__ = "refresh_tokens"
@@ -28,12 +28,6 @@ class RefreshToken(UUIDPrimaryKeyMixin, Base):
     )
     is_revoked: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False, comment="是否已撤销"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        server_default=func.now(),
-        nullable=False,
     )
 
     @property

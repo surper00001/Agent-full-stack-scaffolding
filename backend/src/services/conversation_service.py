@@ -261,7 +261,7 @@ class ConversationService:
             (messages, next_cursor) — next_cursor 为 None 表示无更多数据
         """
         conditions = [
-            not Message.is_deleted,
+            Message.is_deleted.is_(False),
             Message.tenant_id == tenant_id,
             Message.conversation_id == conversation_id,
         ]

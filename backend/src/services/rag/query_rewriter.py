@@ -92,7 +92,16 @@ async def rewrite_query(query: str) -> str:
 
         prompt = _build_hyde_prompt(query)
         result = await llm.ainvoke(prompt)
-        rewritten = result.content.strip() if hasattr(result, "content") else str(result).strip()
+        raw_content = result.content if hasattr(result, "content") else str(result)
+        if isinstance(raw_content, str):
+            rewritten = raw_content.strip()
+        elif isinstance(raw_content, list):
+            rewritten = " ".join(
+                str(item) if isinstance(item, str) else str(item.get("text", ""))
+                for item in raw_content
+            ).strip()
+        else:
+            rewritten = str(raw_content).strip()  # type: ignore[unreachable]
 
         # 清理可能的引号包裹
         if rewritten.startswith('"') and rewritten.endswith('"'):

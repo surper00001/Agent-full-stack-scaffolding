@@ -13,6 +13,7 @@ from langchain_core.documents import Document
 from loguru import logger
 
 if TYPE_CHECKING:
+    from src.services.rag.bm25_fts import BM25FTSRetriever
     from src.vectorstore.base import BaseVectorStore
 
 
@@ -27,7 +28,7 @@ class HybridSearchService:
     def __init__(self, vector_store: BaseVectorStore) -> None:
         self._vector_store = vector_store
         self._bm25_cache: dict[str, Any] = {}
-        self._fts_retriever = None  # lazy init for sqlite_fts5 backend
+        self._fts_retriever: BM25FTSRetriever | None = None  # lazy init for sqlite_fts5 backend
 
     async def search(
         self,
@@ -230,6 +231,10 @@ class HybridSearchService:
     ) -> None:
         """后台异步构建 FTS5 索引，避免阻塞首次搜索。"""
         import asyncio as _asyncio
+
+        if self._fts_retriever is None:
+            logger.warning(f"FTS5 检索器未初始化，跳过后台构建: kb={kb_id}")
+            return
 
         try:
             chunks = await chunk_repo.list_all(

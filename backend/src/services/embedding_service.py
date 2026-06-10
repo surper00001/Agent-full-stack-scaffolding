@@ -49,7 +49,7 @@ class EmbeddingService:
             return
         with self._init_lock:
             if self._initialized:
-                return
+                return  # type: ignore[unreachable]  # Double-checked locking pattern
             try:
                 if self._settings.hf_endpoint:
                     import os
@@ -229,7 +229,7 @@ class EmbeddingService:
                         normalize_embeddings=True,
                         **extra_kwargs,
                     )
-                return embeddings.tolist()
+                return list[list[float]](embeddings.tolist())
             except torch.cuda.OutOfMemoryError:
                 # GPU OOM 时回退到 CPU
                 logger.warning("GPU OOM，回退 CPU 编码")
@@ -244,7 +244,7 @@ class EmbeddingService:
                     normalize_embeddings=True,
                     **extra_kwargs,
                 )
-                result = embeddings.tolist()
+                result = list[list[float]](embeddings.tolist())
                 self._model.to("cuda")
                 torch.cuda.empty_cache()
                 return result
@@ -342,7 +342,7 @@ class EmbeddingBatcher:
             futures.append(fut)
             all_texts.extend(texts)
 
-        result = await fut
+        result: list[list[float]] = await fut
         # 返回属于本次调用的结果切片
         return result[start_idx : start_idx + len(texts)]
 
@@ -464,7 +464,7 @@ class LangchainEmbeddingAdapter:
             normalize_embeddings=True,
             **extra_kwargs,
         )
-        return embeddings.tolist()
+        return list[list[float]](embeddings.tolist())
 
 
 # 向后兼容别名

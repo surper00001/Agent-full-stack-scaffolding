@@ -22,6 +22,9 @@ from loguru import logger
 from src.services.chunking.data_models import ChunkResult, StructuredBlock  # 向后兼容重导出
 from src.services.reference_extractor import ReferenceExtractor
 
+# ── 向后兼容：外部模块从 chunking_service 导入这两个类 ──
+__all__ = ["ChunkingService", "ChunkResult", "StructuredBlock"]
+
 if TYPE_CHECKING:
     from src.services.document_analyzer import DocStructure
 

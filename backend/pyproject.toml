@@ -149,15 +149,20 @@ module = [
     "langgraph.*",
     "pdfplumber",
     "pymupdf",
+    "fitz",
     "docx",
     "mammoth",
     "camelot.*",
     "cv2",
     "paddleocr",
     "paddle",
+    "openpyxl",
     "sentence_transformers",
     "FlagEmbedding",
     "markdownify",
+    "jieba",
+    "rank_bm25",
+    "jose",
 ]
 ignore_missing_imports = true
 

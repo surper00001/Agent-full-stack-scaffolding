@@ -39,18 +39,18 @@ async def get_admin_stats(
     today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
     # 总用户数
-    user_count_stmt = select(func.count(User.id)).where(not User.is_deleted)
+    user_count_stmt = select(func.count(User.id)).where(User.is_deleted.is_(False))
     user_count = (await db.execute(user_count_stmt)).scalar_one()
 
     # 总对话数
-    conv_count_stmt = select(func.count(Conversation.id)).where(not Conversation.is_deleted)
+    conv_count_stmt = select(func.count(Conversation.id)).where(Conversation.is_deleted.is_(False))
     conv_count = (await db.execute(conv_count_stmt)).scalar_one()
 
     # 总消息数 & Token 总量
     msg_stmt = select(
         func.count(Message.id),
         func.coalesce(func.sum(Message.token_count), 0),
-    ).where(not Message.is_deleted)
+    ).where(Message.is_deleted.is_(False))
     msg_result = (await db.execute(msg_stmt)).one()
     total_messages = msg_result[0]
     total_tokens = int(msg_result[1])
@@ -59,17 +59,17 @@ async def get_admin_stats(
     today_token_stmt = (
         select(func.coalesce(func.sum(Message.token_count), 0))
         .where(
-            not Message.is_deleted,
+            Message.is_deleted.is_(False),
             Message.created_at >= today_start,
         )
     )
-    tokens_today = int((await db.execute(today_token_stmt)).scalar_one())
+    tokens_today = int((await db.execute(today_token_stmt)).scalar_one() or 0)
 
     # 今日活跃用户（通过对话）
     active_stmt = (
         select(func.count(func.distinct(Conversation.user_id)))
         .where(
-            not Conversation.is_deleted,
+            Conversation.is_deleted.is_(False),
             Conversation.created_at >= today_start,
         )
     )

@@ -82,6 +82,7 @@ class BaseSandbox(ABC):
 
     def __init__(self, config: SandboxConfig) -> None:
         self.config = config
+        self._id: str = ""
         self._status = SandboxStatus.IDLE
         self._created_at = time.time()
         self._execution_count = 0

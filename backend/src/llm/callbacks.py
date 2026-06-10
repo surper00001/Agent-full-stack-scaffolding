@@ -62,7 +62,7 @@ class TokenUsageCallback(BaseCallbackHandler):
                 if response.llm_output and "model_name" in response.llm_output:
                     model_name = response.llm_output["model_name"]
                 elif hasattr(response, "model"):
-                    model_name = str(response.model)  # type: ignore[union-attr]
+                    model_name = str(response.model)
 
                 get_llm_tracker().record_sync(
                     model=model_name,

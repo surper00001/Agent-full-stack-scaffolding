@@ -38,7 +38,7 @@ class UserService:
             .where(
                 and_(
                     Conversation.user_id == cast(User.id, String),
-                    not Conversation.is_deleted,
+                    Conversation.is_deleted.is_(False),
                 )
             )
             .correlate(User)
@@ -54,8 +54,8 @@ class UserService:
             .where(
                 and_(
                     Conversation.user_id == cast(User.id, String),
-                    not Message.is_deleted,
-                    not Conversation.is_deleted,
+                    Message.is_deleted.is_(False),
+                    Conversation.is_deleted.is_(False),
                 )
             )
             .correlate(User)
@@ -63,7 +63,7 @@ class UserService:
             .label("total_tokens")
         )
 
-        conditions = [not User.is_deleted, User.tenant_id == tenant_id]
+        conditions = [User.is_deleted.is_(False), User.tenant_id == tenant_id]
         if search:
             search_term = f"%{search}%"
             conditions.append(
@@ -130,7 +130,7 @@ class UserService:
             .where(
                 and_(
                     Conversation.user_id == user_id,
-                    not Conversation.is_deleted,
+                    Conversation.is_deleted.is_(False),
                 )
             )
         )
@@ -145,8 +145,8 @@ class UserService:
             .where(
                 and_(
                     Conversation.user_id == user_id,
-                    not Message.is_deleted,
-                    not Conversation.is_deleted,
+                    Message.is_deleted.is_(False),
+                    Conversation.is_deleted.is_(False),
                 )
             )
         )
@@ -163,7 +163,7 @@ class UserService:
             .where(
                 and_(
                     Conversation.user_id == user_id,
-                    not Conversation.is_deleted,
+                    Conversation.is_deleted.is_(False),
                 )
             )
             .group_by(Conversation.id)
@@ -226,7 +226,7 @@ class UserService:
             .where(
                 and_(
                     Conversation.user_id == user_id,
-                    not Conversation.is_deleted,
+                    Conversation.is_deleted.is_(False),
                 )
             )
         )
@@ -243,7 +243,7 @@ class UserService:
             .where(
                 and_(
                     Conversation.user_id == user_id,
-                    not Conversation.is_deleted,
+                    Conversation.is_deleted.is_(False),
                 )
             )
             .group_by(Conversation.id)
@@ -296,8 +296,8 @@ class UserService:
             .where(
                 and_(
                     Conversation.user_id == user_id,
-                    not Conversation.is_deleted,
-                    not Message.is_deleted,
+                    Conversation.is_deleted.is_(False),
+                    Message.is_deleted.is_(False),
                 )
             )
             .group_by(Conversation.id)
@@ -351,8 +351,8 @@ class UserService:
                 and_(
                     Conversation.user_id == user_id,
                     Message.created_at >= since,
-                    not Message.is_deleted,
-                    not Conversation.is_deleted,
+                    Message.is_deleted.is_(False),
+                    Conversation.is_deleted.is_(False),
                 )
             )
             .group_by(text("date"))

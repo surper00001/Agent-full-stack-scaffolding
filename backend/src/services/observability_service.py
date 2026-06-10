@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from sqlalchemy import func, select, text
 
+from src.llm.resilience import CircuitState
 from src.models.domain.agent import AgentConfig
 from src.models.domain.conversation import Conversation, Message
 from src.models.domain.user import User
@@ -274,14 +275,14 @@ class ObservabilityService:
         try:
             # 总用户数
             result = await self._db.execute(
-                select(func.count(User.id)).where(not User.is_deleted)
+                select(func.count(User.id)).where(User.is_deleted.is_(False))
             )
             overview.total_requests = result.scalar() or 0
 
             # 今日注册用户
             result = await self._db.execute(
                 select(func.count(User.id)).where(
-                    User.created_at >= today, not User.is_deleted
+                    User.created_at >= today, User.is_deleted.is_(False)
                 )
             )
             overview.requests_today = result.scalar() or 0
@@ -301,26 +302,26 @@ class ObservabilityService:
 
             # Agent 统计
             result = await self._db.execute(
-                select(func.count(AgentConfig.id)).where(not AgentConfig.is_deleted)
+                select(func.count(AgentConfig.id)).where(AgentConfig.is_deleted.is_(False))
             )
             result.scalar() or 0
 
             result = await self._db.execute(
                 select(func.count(AgentConfig.id)).where(
-                    AgentConfig.is_active, not AgentConfig.is_deleted
+                    AgentConfig.is_active, AgentConfig.is_deleted.is_(False)
                 )
             )
             result.scalar() or 0
 
             # 对话统计
             result = await self._db.execute(
-                select(func.count(Conversation.id)).where(not Conversation.is_deleted)
+                select(func.count(Conversation.id)).where(Conversation.is_deleted.is_(False))
             )
             result.scalar() or 0
 
             result = await self._db.execute(
                 select(func.count(Conversation.id)).where(
-                    Conversation.created_at >= today, not Conversation.is_deleted
+                    Conversation.created_at >= today, Conversation.is_deleted.is_(False)
                 )
             )
             overview.agent_executions_today = result.scalar() or 0
@@ -373,10 +374,10 @@ class ObservabilityService:
             overview.db_healthy = False
 
         try:
-            from src.services.redis_service import get_redis
-            redis = get_redis()
-            if redis:
-                await redis.ping()
+            from src.services.redis_service import RedisService
+            redis_svc = await RedisService.get_instance()
+            if redis_svc.available:
+                await redis_svc._client.ping()
                 overview.redis_healthy = True
             else:
                 overview.redis_healthy = False
@@ -395,7 +396,7 @@ class ObservabilityService:
             from src.llm.resilience import get_circuit
             cb = get_circuit(get_settings().llm_provider)
             if cb:
-                overview.llm_provider_healthy = cb.state != "OPEN"
+                overview.llm_provider_healthy = cb.state != CircuitState.OPEN
         except Exception:
             pass
 
@@ -418,7 +419,7 @@ class ObservabilityService:
         # 获取 Agent 配置
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, not AgentConfig.is_deleted
+                AgentConfig.id == agent_id, AgentConfig.is_deleted.is_(False)
             )
         )
         agent = result.scalar_one_or_none()
@@ -433,16 +434,16 @@ class ObservabilityService:
         )
 
         # 关联对话统计
-        result = await self._db.execute(
+        count_result = await self._db.execute(
             select(func.count(Conversation.id)).where(
                 Conversation.agent_type == agent.agent_type,
-                not Conversation.is_deleted,
+                Conversation.is_deleted.is_(False),
             )
         )
-        analytics.conversation_count = result.scalar() or 0
+        analytics.conversation_count = count_result.scalar() or 0
 
         # 关联消息 Token 统计
-        result = await self._db.execute(
+        token_result = await self._db.execute(
             select(
                 func.coalesce(func.sum(Message.token_count), 0),
                 func.count(Message.id),
@@ -453,7 +454,7 @@ class ObservabilityService:
                 Message.role == "assistant",
             )
         )
-        row = result.one_or_none()
+        row = token_result.one_or_none()
         if row:
             analytics.total_tokens = row[0] or 0
             analytics.total_executions = row[1] or 0
@@ -487,7 +488,7 @@ class ObservabilityService:
     async def get_all_agent_analytics(self) -> list[AgentAnalytics]:
         """获取所有 Agent 的分析数据。"""
         result = await self._db.execute(
-            select(AgentConfig).where(not AgentConfig.is_deleted)
+            select(AgentConfig).where(AgentConfig.is_deleted.is_(False))
         )
         agents = result.scalars().all()
 
@@ -525,11 +526,11 @@ class ObservabilityService:
 
         # Redis
         try:
-            from src.services.redis_service import get_redis
-            redis = get_redis()
-            if redis:
+            from src.services.redis_service import RedisService
+            redis_svc = await RedisService.get_instance()
+            if redis_svc.available:
                 start = time.perf_counter()
-                await redis.ping()
+                await redis_svc._client.ping()
                 latency = (time.perf_counter() - start) * 1000
                 items.append({
                     "name": "Redis",
@@ -567,7 +568,7 @@ class ObservabilityService:
             from src.core.config import get_settings
             from src.llm.resilience import get_circuit
             cb = get_circuit(get_settings().llm_provider)
-            state = cb.state if cb else "unknown"
+            state = cb.state.value if cb else "unknown"
             items.append({
                 "name": "LLM Provider",
                 "status": "healthy" if state == "CLOSED" else ("degraded" if state == "HALF_OPEN" else "unhealthy"),
@@ -586,8 +587,8 @@ class ObservabilityService:
             cb = get_circuit(get_settings().llm_provider)
             items.append({
                 "name": "Circuit Breaker",
-                "status": "healthy" if cb and cb.state == "CLOSED" else "degraded",
-                "detail": cb.state if cb else "N/A",
+                "status": "healthy" if cb and cb.state == CircuitState.CLOSED else "degraded",
+                "detail": cb.state.value if cb else "N/A",
                 "icon": "shield",
             })
         except Exception:
@@ -610,10 +611,10 @@ class ObservabilityService:
                 func.coalesce(func.sum(Message.token_count), 0),
                 func.count(Message.id),
             ).where(
-                not Message.is_deleted,
+                Message.is_deleted.is_(False),
                 Message.created_at >= cutoff,
                 Message.role == "assistant",
-            ).group_by(func.date(Message.created_at)).order_by("day")
+            ).group_by(func.date(Message.created_at)).order_by(text("day"))
         )
         rows = result.all()
 
@@ -650,11 +651,11 @@ class ObservabilityService:
                 Conversation.agent_type,
                 func.count(Conversation.id),
             ).where(
-                not Conversation.is_deleted,
+                Conversation.is_deleted.is_(False),
                 Conversation.created_at >= cutoff,
             ).group_by(
                 func.date(Conversation.created_at), Conversation.agent_type,
-            ).order_by("day")
+            ).order_by(text("day"))
         )
         rows = result.all()
 
@@ -675,7 +676,7 @@ class ObservabilityService:
         # 先查 agent
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, not AgentConfig.is_deleted
+                AgentConfig.id == agent_id, AgentConfig.is_deleted.is_(False)
             )
         )
         agent = result.scalar_one_or_none()
@@ -692,11 +693,11 @@ class ObservabilityService:
                 func.count(Conversation.id),
             ).where(
                 Conversation.agent_type == agent.agent_type,
-                not Conversation.is_deleted,
+                Conversation.is_deleted.is_(False),
                 Conversation.created_at >= cutoff,
             ).group_by(
                 func.date(Conversation.created_at), Conversation.status,
-            ).order_by("day")
+            ).order_by(text("day"))
         )
         rows = result.all()
 
@@ -730,7 +731,7 @@ class ObservabilityService:
         """单个 Agent 按天 Token 消耗。"""
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, not AgentConfig.is_deleted
+                AgentConfig.id == agent_id, AgentConfig.is_deleted.is_(False)
             )
         )
         agent = result.scalar_one_or_none()
@@ -748,9 +749,9 @@ class ObservabilityService:
                 Conversation, Message.conversation_id == Conversation.id
             ).where(
                 Conversation.agent_type == agent.agent_type,
-                not Message.is_deleted,
+                Message.is_deleted.is_(False),
                 Message.created_at >= cutoff,
-            ).group_by(func.date(Message.created_at)).order_by("day")
+            ).group_by(func.date(Message.created_at)).order_by(text("day"))
         )
         rows = result.all()
 
@@ -783,7 +784,7 @@ class ObservabilityService:
 
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, not AgentConfig.is_deleted
+                AgentConfig.id == agent_id, AgentConfig.is_deleted.is_(False)
             )
         )
         agent = result.scalar_one_or_none()
@@ -802,20 +803,20 @@ class ObservabilityService:
         """获取 Agent 最近执行记录。"""
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, not AgentConfig.is_deleted
+                AgentConfig.id == agent_id, AgentConfig.is_deleted.is_(False)
             )
         )
         agent = result.scalar_one_or_none()
         if not agent:
             return []
 
-        result = await self._db.execute(
+        conv_result = await self._db.execute(
             select(Conversation).where(
                 Conversation.agent_type == agent.agent_type,
-                not Conversation.is_deleted,
+                Conversation.is_deleted.is_(False),
             ).order_by(Conversation.created_at.desc()).limit(limit)
         )
-        conversations = result.scalars().all()
+        conversations = conv_result.scalars().all()
 
         records = []
         for conv in conversations:

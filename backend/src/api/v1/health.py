@@ -55,12 +55,12 @@ async def _check_redis() -> dict[str, Any]:
     try:
         from src.core.redis import get_redis_client
 
-        redis = get_redis_client()
+        redis = await get_redis_client()
         if redis is None:
             return {"status": "disabled", "message": "Redis 未配置或不可用"}
 
         start = time.perf_counter()
-        pong = await redis.ping()
+        pong = await redis.ping()  # type: ignore[misc]
         latency = round((time.perf_counter() - start) * 1000, 2)
 
         info = await redis.info("memory")
@@ -83,12 +83,12 @@ def _check_disk() -> dict[str, Any]:
         if not os.path.exists(data_dir):
             os.makedirs(data_dir, exist_ok=True)
 
-        try:
+        # os.statvfs is Unix-only; fall back to shutil.disk_usage on Windows
+        if hasattr(os, "statvfs"):
             usage = os.statvfs(data_dir)
             total_gb = round(usage.f_frsize * usage.f_blocks / (1024**3), 1)
             free_gb = round(usage.f_frsize * usage.f_bavail / (1024**3), 1)
-        except AttributeError:
-            # Windows 不支持 statvfs，使用 shutil 回退
+        else:
             import shutil as _shutil
             disk = _shutil.disk_usage(data_dir)
             total_gb = round(disk.total / (1024**3), 1)
@@ -115,8 +115,9 @@ async def _check_llm() -> dict[str, Any]:
 
         factory = get_llm_factory()
         llm = factory.create_chat_model()
+        # Defensive check: LLM may not be configured, even if factory returns None
         if llm is None:
-            return {"status": "disabled", "message": "LLM 未配置"}
+            return {"status": "disabled", "message": "LLM 未配置"}  # type: ignore[unreachable]
 
         import time as _time
         start = _time.perf_counter()

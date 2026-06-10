@@ -39,7 +39,7 @@ def get_current_tenant(
     优先级：中间件注入 > Header > 默认值
     """
     # 优先从中间件注入的 request.state 获取
-    tenant_id = getattr(request.state, "tenant_id", None)
+    tenant_id: str | None = getattr(request.state, "tenant_id", None)
     if tenant_id:
         return tenant_id
 

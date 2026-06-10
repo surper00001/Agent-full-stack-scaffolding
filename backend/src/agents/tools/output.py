@@ -75,7 +75,7 @@ def save_srt_subtitle(subtitles_json: str) -> str:
         items = json.loads(subtitles_json)
         if not isinstance(items, list):
             return "错误：请输入 JSON 数组格式的字幕数据"
-        srt_lines = []
+        srt_lines: list[str] = []
         for sub in items:
             srt_lines.append(str(sub.get("index", len(srt_lines) // 4 + 1)))
             srt_lines.append(f"{sub['start']} --> {sub['end']}")

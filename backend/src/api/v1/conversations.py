@@ -11,7 +11,7 @@ import asyncio
 import json
 import re
 import time as _time
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -824,4 +824,4 @@ async def export_mindmap_endpoint(
         "mindmap_json": json.dumps(mindmap_data, ensure_ascii=False),
         "format": fmt,
     })
-    return json.loads(result_json)
+    return cast("dict[str, Any]", json.loads(result_json))

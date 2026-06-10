@@ -303,7 +303,7 @@ class MinerUParser:
 
         for item in content_list:
             if not isinstance(item, dict):
-                continue
+                continue  # type: ignore[unreachable]  # Defensive: skip malformed entries even though param is typed as list[dict]
 
             block_type_raw = item.get("type", "text")
             text = item.get("text", "") or ""

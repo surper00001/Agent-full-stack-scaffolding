@@ -109,11 +109,11 @@ class AuthService:
         使用通用错误消息防止用户枚举攻击。
         """
         if await self._get_by_username(username, tenant_id):
-            raise UserAlreadyExistsError("该账号信息已被注册")
+            raise UserAlreadyExistsError("该账号信息已被注册", value="")
         if phone and await self._get_by_phone(phone, tenant_id):
-            raise UserAlreadyExistsError("该账号信息已被注册")
+            raise UserAlreadyExistsError("该账号信息已被注册", value="")
         if email and await self._get_by_email(email, tenant_id):
-            raise UserAlreadyExistsError("该账号信息已被注册")
+            raise UserAlreadyExistsError("该账号信息已被注册", value="")
 
     # ---- 登录（双 Token） ----
 

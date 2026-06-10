@@ -11,7 +11,7 @@ Skill Registry — DB-backed 工具注册表。
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -37,8 +37,8 @@ def register_tool(tool: HarnessTool) -> None:
 def unregister_tool(name: str) -> HarnessTool | None:
     """注销工具。返回被注销的 HarnessTool 或 None。"""
     entry = _get_registry().unregister(name)
-    if entry and entry.harness_tool is not None:
-        return entry.harness_tool
+    if entry is not None and entry.harness_tool is not None:
+        return cast("HarnessTool", entry.harness_tool)
     return None
 
 
@@ -153,7 +153,7 @@ def _skill_to_tool(skill: Any) -> HarnessTool:
             default = ... if required else (prop_info.get("default", None))
             description = prop_info.get("description", "")
             fields[prop_name] = (prop_type, Field(default=default, description=description))
-        input_model = create_model(f"{skill.name}_Input", **fields) if fields else create_model(f"{skill.name}_Input")
+        input_model = create_model(f"{skill.name}_Input", **fields) if fields else create_model(f"{skill.name}_Input")  # type: ignore[call-overload]
     else:
         input_model = create_model(f"{skill.name}_Input")
 
@@ -166,10 +166,10 @@ def _skill_to_tool(skill: Any) -> HarnessTool:
         requires_sandbox: ClassVar[bool] = skill.requires_sandbox
 
         def is_read_only(self, input: Any) -> bool:  # noqa: ARG002
-            return skill.is_read_only
+            return bool(skill.is_read_only)
 
         def is_concurrency_safe(self, input: Any) -> bool:  # noqa: ARG002
-            return skill.is_concurrency_safe
+            return bool(skill.is_concurrency_safe)
 
         async def execute(self, input: Any, signal: Any) -> Any:
             # 代码完整性校验
@@ -181,7 +181,7 @@ def _skill_to_tool(skill: Any) -> HarnessTool:
             # 编译并执行 Skill 代码
             restricted_globals: dict[str, Any] = {
                 "__builtins__": {
-                    k: v for k, v in __builtins__.__dict__.items()  # type: ignore[attr-defined]
+                    k: v for k, v in __builtins__.__dict__.items()
                     if k in (
                         "print", "len", "range", "enumerate", "zip", "map", "filter",
                         "list", "dict", "set", "tuple", "str", "int", "float", "bool",

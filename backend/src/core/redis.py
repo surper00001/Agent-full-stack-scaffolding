@@ -20,6 +20,14 @@ async def get_redis() -> Redis:
     return _redis
 
 
+async def get_redis_client() -> Redis | None:
+    """获取 Redis 客户端（兼容旧接口名称，async 工厂）。"""
+    try:
+        return await get_redis()
+    except Exception:
+        return None
+
+
 async def close_redis() -> None:
     """关闭 Redis 连接。"""
     global _redis
