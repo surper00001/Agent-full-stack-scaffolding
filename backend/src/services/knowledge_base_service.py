@@ -264,14 +264,14 @@ class KnowledgeBaseService:
         self, user_id: str, tenant_id: str, skip: int = 0, limit: int = 20
     ) -> list[KnowledgeBase]:
         return cast(
-            list[KnowledgeBase],
+            "list[KnowledgeBase]",
             await self._kb_repo.list_all(
                 tenant_id=tenant_id, user_id=user_id, skip=skip, limit=limit
             ),
         )
 
     async def count_kbs(self, user_id: str, tenant_id: str) -> int:
-        return cast(int, await self._kb_repo.count(tenant_id=tenant_id, user_id=user_id))
+        return cast("int", await self._kb_repo.count(tenant_id=tenant_id, user_id=user_id))
 
     async def update_kb(
         self, kb_id: str, tenant_id: str, **updates: Any
@@ -672,14 +672,14 @@ class KnowledgeBaseService:
         self, kb_id: str, tenant_id: str, skip: int = 0, limit: int = 50
     ) -> list[KBDocument]:
         return cast(
-            list[KBDocument],
+            "list[KBDocument]",
             await self._doc_repo.list_all(
                 tenant_id=tenant_id, knowledge_base_id=kb_id, skip=skip, limit=limit
             ),
         )
 
     async def count_documents(self, kb_id: str, tenant_id: str) -> int:
-        return cast(int, await self._doc_repo.count(tenant_id=tenant_id, knowledge_base_id=kb_id))
+        return cast("int", await self._doc_repo.count(tenant_id=tenant_id, knowledge_base_id=kb_id))
 
     async def delete_document(
         self, doc_id: str, kb_id: str, tenant_id: str, _user_id: str
