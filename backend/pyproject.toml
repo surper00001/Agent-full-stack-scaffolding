@@ -168,6 +168,19 @@ module = [
 ]
 ignore_missing_imports = true
 
+# CI 中 uv sync 会将源码当作 installed package，而 py.typed 标记不一定被传播。
+# 这些模块已由 mypy src/ 直接检查，此处跳过 import-follow 即可。
+[[tool.mypy.overrides]]
+module = [
+    "src.agents.tools.kb_search",
+    "src.agents.tools.file_tools",
+    "src.agents.tools.network_tools",
+    "src.agents.tools.shell_tool",
+    "src.agents.tools.resume",
+    "src.agents.tools.skill_tools",
+]
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
