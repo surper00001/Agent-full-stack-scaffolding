@@ -64,7 +64,8 @@ class AuthService:
             if secret is None:
                 continue
 
-            totp = pyotp.TOTP(secret, digits=6, interval=settings.verification_code_ttl)
+            key_bytes = secret.decode() if isinstance(secret, bytes) else secret
+            totp = pyotp.TOTP(key_bytes, digits=6, interval=settings.verification_code_ttl)
             if totp.verify(code):
                 await redis.delete(key)
                 return True
