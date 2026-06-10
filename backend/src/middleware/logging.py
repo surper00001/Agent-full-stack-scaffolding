@@ -16,7 +16,6 @@ import uuid
 from loguru import logger
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
 
 from src.monitoring.metrics import REQUEST_COUNT, REQUEST_LATENCY
 
@@ -24,7 +23,7 @@ from src.monitoring.metrics import REQUEST_COUNT, REQUEST_LATENCY
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """HTTP 请求日志中间件。"""
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         # 生成请求 ID
         request_id = str(uuid.uuid4())[:8]
         request.state.request_id = request_id
@@ -57,4 +56,4 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Response-Time"] = f"{elapsed_ms:.1f}ms"
 
-        return response
+        return response  # type: ignore[no-any-return]

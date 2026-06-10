@@ -263,8 +263,8 @@ class CodeScanner:
     def _run_bandit(self, code: str) -> Any | None:
         """运行 bandit 静态安全分析。"""
         try:
-            import bandit.core.config as bandit_config
-            import bandit.core.manager as bandit_manager
+            import bandit.core.config as bandit_config  # type: ignore[import-not-found]
+            import bandit.core.manager as bandit_manager  # type: ignore[import-not-found]
 
             # Bandit 配置
             b_conf = bandit_config.BanditConfig()

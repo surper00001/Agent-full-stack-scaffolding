@@ -958,17 +958,17 @@ class ChunkingService:
                     final.append(chunk)
             return final
 
-        final: list[str] = []
+        result_chunks: list[str] = []
         for chunk in chunks:
             if self._char_count(chunk) > chunk_size:
-                final.extend(
+                result_chunks.extend(
                     self._recursive_split(
                         chunk, remaining_separators, chunk_size, chunk_overlap
                     )
                 )
             else:
-                final.append(chunk)
-        return self._apply_overlap(final, chunk_overlap)
+                result_chunks.append(chunk)
+        return self._apply_overlap(result_chunks, chunk_overlap)
 
     def _advance_by_char_count(self, text: str, start: int, max_count: int) -> int:
         """从 start 起找到使有效字符数不超过 max_count 的最大结束索引。"""

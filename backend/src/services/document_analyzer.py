@@ -9,7 +9,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class DocCategory(str, Enum):  # noqa: UP042
@@ -65,13 +68,14 @@ class HeadingNode:
     children: list[HeadingNode] = field(default_factory=list)
     start_offset: int = 0
     end_offset: int = 0
+    _parent: HeadingNode | None = field(default=None, repr=False)
 
     def to_path(self) -> str:
         """返回层级路径，如 '第一章 > 1.1 概述 > 1.1.1 背景'。"""
         parts = [self.title]
         node = self
-        while hasattr(node, "_parent") and node._parent is not None:  # type: ignore[attr-defined]
-            node = node._parent  # type: ignore[attr-defined]
+        while hasattr(node, "_parent") and node._parent is not None:
+            node = node._parent
             parts.insert(0, node.title)
         return " > ".join(parts)
 
@@ -172,7 +176,7 @@ class DocumentTypeAnalyzer:
         scores[DocCategory.TECHNICAL] = self._score_text(full_text, self._technical_re)
         scores[DocCategory.REPORT] = self._score_text(full_text, self._report_re)
 
-        best_category = max(scores, key=lambda k: scores[k])  # type: ignore[arg-type]
+        best_category = max(scores, key=lambda k: scores[k])
         best_score = scores[best_category]
 
         if best_score < 0.15:
@@ -182,7 +186,7 @@ class DocumentTypeAnalyzer:
             best_category, best_score, full_text, structured_blocks, page_count
         )
 
-    def _score_text(self, text: str, patterns: list[re.Pattern]) -> float:
+    def _score_text(self, text: str, patterns: list[re.Pattern[str]]) -> float:
         """对文本按模式打分，返回 0~1 的置信度。"""
         if not text:
             return 0.0
@@ -199,7 +203,7 @@ class DocumentTypeAnalyzer:
             return 0.0
         return min(matched_weight / total_weight, 1.0)
 
-    def _get_pattern_weights(self, patterns: list[re.Pattern]) -> list[tuple[re.Pattern, float]]:
+    def _get_pattern_weights(self, patterns: list[re.Pattern[str]]) -> list[tuple[re.Pattern[str], float]]:
         """将编译后的正则列表映射回对应的权重。"""
         all_sets = [
             (self._academic_re, self._ACADEMIC_PATTERNS),
@@ -228,7 +232,7 @@ class DocumentTypeAnalyzer:
         """从纯文本中提取章节标题层级。"""
         headings: list[HeadingNode] = []
         # 匹配多种中文/英文标题格式
-        heading_patterns = [
+        heading_patterns: list[tuple[str, Callable[[re.Match[str]], tuple[int, str]]]] = [
             # Markdown style
             (r"^(#{1,6})\s+(.+?)(?:\s*\{#.*?\})?\s*$", lambda m: (len(m.group(1)), m.group(2).strip())),
             # 中文编号: 第一章 / 1. / 1.1 / 1.1.1

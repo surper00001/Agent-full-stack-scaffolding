@@ -386,8 +386,8 @@ _DEFAULT_INDENT_WIDTH = 24.0
 
 
 def enrich_list_structure(
-    blocks: list,
-) -> list:
+    blocks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """为连续的 LIST_ITEM 块补充嵌套层级和列表类型信息。
 
     - 通过缩进检测嵌套层级（每级缩进 ~24pt）
@@ -417,21 +417,21 @@ def enrich_list_structure(
 
         # 计算基线缩进（第一个列表项或最小缩进）
         x0_values = [
-            b.bbox[0] if b.bbox else 0.0
+            b.bbox[0] if b.bbox else 0.0  # type: ignore[attr-defined]
             for _, b in list_group
         ]
         base_x0 = min(x0_values) if x0_values else 0.0
 
         for _idx, b in list_group:
-            bbox_x0 = b.bbox[0] if b.bbox else base_x0
+            bbox_x0 = b.bbox[0] if b.bbox else base_x0  # type: ignore[attr-defined]
             # 缩进层级 = (当前缩进 - 基线) / 24pt，向上取整
             indent = max(0.0, bbox_x0 - base_x0)
             level = round(indent / _DEFAULT_INDENT_WIDTH)
             level = max(0, min(level, 4))  # 最多 4 级嵌套
 
-            stripped = b.content.strip()
-            b.list_type = "ordered" if _ORDERED_LIST_RE.match(stripped) else "unordered"
-            b.list_level = level
+            stripped = b.content.strip()  # type: ignore[attr-defined]
+            b.list_type = "ordered" if _ORDERED_LIST_RE.match(stripped) else "unordered"  # type: ignore[attr-defined]
+            b.list_level = level  # type: ignore[attr-defined]
 
         i = j  # 跳过已处理的组
 

@@ -34,9 +34,9 @@ class BaseRepository(Generic[ModelType]):
         """按主键 ID 和租户 ID 查询（多租户安全查询）。"""
         stmt = select(self._model).where(
             and_(
-                self._model.id == id_,
-                self._model.tenant_id == tenant_id,
-                self._model.is_deleted == False,  # noqa: E712
+                self._model.id == id_,  # type: ignore[attr-defined]
+                self._model.tenant_id == tenant_id,  # type: ignore[attr-defined]
+                self._model.is_deleted == False,  # noqa: E712  # type: ignore[attr-defined]
             )
         )
         result = await self._session.execute(stmt)
@@ -50,7 +50,7 @@ class BaseRepository(Generic[ModelType]):
         **filters: Any,
     ) -> list[ModelType]:
         """分页查询列表，支持按租户过滤和自定义条件。"""
-        conditions = [self._model.is_deleted == False]  # noqa: E712
+        conditions = [self._model.is_deleted == False]  # noqa: E712  # type: ignore[attr-defined]
         if tenant_id is not None:
             conditions.append(self._model.tenant_id == tenant_id)
         for field, value in filters.items():
@@ -69,7 +69,7 @@ class BaseRepository(Generic[ModelType]):
 
     async def count(self, tenant_id: str | None = None, **filters: Any) -> int:
         """统计符合条件的记录数。"""
-        conditions = [self._model.is_deleted == False]  # noqa: E712
+        conditions = [self._model.is_deleted == False]  # noqa: E712  # type: ignore[attr-defined]
         if tenant_id is not None:
             conditions.append(self._model.tenant_id == tenant_id)
         for field, value in filters.items():

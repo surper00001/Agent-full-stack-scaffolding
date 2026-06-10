@@ -88,7 +88,7 @@ class MessageItem(BaseModel):
             proxy = _MsgProxy()
             for attr in ("id", "conversation_id", "role", "content", "token_count", "created_at"):
                 setattr(proxy, attr, getattr(obj, attr))
-            proxy.metadata_ = parsed
+            proxy.metadata_ = parsed  # type: ignore[attr-defined]
             return super().model_validate(proxy, **kwargs)
         return super().model_validate(obj, **kwargs)
 

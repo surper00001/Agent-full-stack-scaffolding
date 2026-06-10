@@ -131,7 +131,7 @@ class SkillLifecycle:
 
     def get_allowed_transitions(self) -> dict[SkillStatus, str]:
         """获取当前状态允许的所有目标状态及说明。"""
-        return dict(_STATE_TRANSITIONS.get(self._status, {}))
+        return dict(_STATE_TRANSITIONS.get(self._status, {}))  # type: ignore[arg-type]
 
     def transition(
         self,

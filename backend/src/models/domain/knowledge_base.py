@@ -6,6 +6,8 @@ KBDocument  → 上传的源文件
 KBChunk     → 文档分块（文本/表格/图片）
 """
 
+from typing import Any
+
 from sqlalchemy import JSON, UUID, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -89,7 +91,7 @@ class KBDocument(BaseModel):
     error_message: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="错误信息"
     )
-    metadata_: Mapped[dict | None] = mapped_column(
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(  # type: ignore[type-arg]
         JSON, nullable=True, comment="扩展元数据（作者、标题、OCR 结果等）"
     )
 
@@ -138,7 +140,7 @@ class KBChunk(BaseModel):
     vector_id: Mapped[str | None] = mapped_column(
         String(256), nullable=True, comment="向量数据库中的 ID"
     )
-    metadata_: Mapped[dict | None] = mapped_column(
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(  # type: ignore[type-arg]
         JSON, nullable=True, comment="位置信息: {bbox, section, table_html, image_path, ...}"
     )
 
