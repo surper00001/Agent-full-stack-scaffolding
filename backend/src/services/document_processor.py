@@ -86,7 +86,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
         user_id: str | None = None,
         kb_id: str | None = None,
         doc_id: str | None = None,
-    ) -> tuple[list[StructuredBlock], int, dict, DocStructure]:
+    ) -> tuple[list[StructuredBlock], int, dict[str, Any], DocStructure]:
         """处理存档文件，返回 (blocks, page_count, metadata, doc_structure)。"""
         self._stored_path = stored_path
         self._img_counter = 0
@@ -157,7 +157,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
 
         return blocks, page_count, metadata, doc_structure
 
-    def _process_pdf(self, file_path: str) -> tuple[list[StructuredBlock], int, dict]:
+    def _process_pdf(self, file_path: str) -> tuple[list[StructuredBlock], int, dict[str, Any]]:
         """处理 PDF 文件，优先使用 MinerU，失败则回退到 pdfplumber 管线。"""
         from src.services.document_processors.mineru import MinerUParser
 
@@ -261,7 +261,7 @@ class DocumentProcessor(PDFMixin, TableUtilsMixin):
 
     # ---- DOCX 处理 ----
 
-    def _process_docx(self, file_path: str) -> tuple[list[StructuredBlock], int, dict]:
+    def _process_docx(self, file_path: str) -> tuple[list[StructuredBlock], int, dict[str, Any]]:
         from docx import Document
         from docx.oxml.ns import qn
 
