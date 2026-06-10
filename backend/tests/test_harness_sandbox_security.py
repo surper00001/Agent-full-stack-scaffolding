@@ -3,10 +3,16 @@
 """
 
 import asyncio
+import os
 import tempfile
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("HARNESS_SANDBOX_ENABLED", "true").lower() == "false",
+    reason="HARNESS_SANDBOX_ENABLED=false（CI 环境不支持 ProcessSandbox）",
+)
 
 from src.harness.sandbox.base import NetworkMode, SandboxConfig
 from src.harness.sandbox.manager import SandboxManager

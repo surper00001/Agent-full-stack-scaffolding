@@ -11,9 +11,16 @@ Harness Engineering 集成测试。
 """
 
 import asyncio
+import os
 import time
 
 import pytest
+
+# CI 中 HARNESS_SANDBOX_ENABLED=false，跳过所有 sandbox 相关测试
+skip_sandbox = pytest.mark.skipif(
+    os.environ.get("HARNESS_SANDBOX_ENABLED", "true").lower() == "false",
+    reason="HARNESS_SANDBOX_ENABLED=false（CI 环境不支持 ProcessSandbox）",
+)
 from pydantic import BaseModel, Field
 
 
@@ -443,6 +450,7 @@ class TestSecurityScannerIntegration:
 class TestSandboxIntegration:
     """测试沙箱系统的完整功能。"""
 
+    @skip_sandbox
     @pytest.mark.asyncio
     async def test_process_sandbox_basic_execution(self):
         """ProcessSandbox 基本代码执行。"""
@@ -458,6 +466,7 @@ class TestSandboxIntegration:
         finally:
             await sandbox.stop()
 
+    @skip_sandbox
     @pytest.mark.asyncio
     async def test_process_sandbox_execute_command(self):
         """ProcessSandbox Shell 命令执行（受限）。"""
@@ -474,6 +483,7 @@ class TestSandboxIntegration:
         finally:
             await sandbox.stop()
 
+    @skip_sandbox
     @pytest.mark.asyncio
     async def test_sandbox_timeout(self):
         """沙箱执行超时。"""
@@ -491,6 +501,7 @@ class TestSandboxIntegration:
         finally:
             await sandbox.stop()
 
+    @skip_sandbox
     @pytest.mark.asyncio
     async def test_sandbox_health_check(self):
         """沙箱健康检查。"""
@@ -505,6 +516,7 @@ class TestSandboxIntegration:
         finally:
             await sandbox.stop()
 
+    @skip_sandbox
     @pytest.mark.asyncio
     async def test_sandbox_restart(self):
         """沙箱重启。"""
@@ -528,6 +540,7 @@ class TestSandboxIntegration:
         finally:
             await sandbox.stop()
 
+    @skip_sandbox
     @pytest.mark.asyncio
     async def test_sandbox_forbidden_imports_blocked(self):
         """沙箱应阻止禁止的 import。"""
@@ -543,6 +556,7 @@ class TestSandboxIntegration:
         finally:
             await sandbox.stop()
 
+    @skip_sandbox
     @pytest.mark.asyncio
     async def test_sandbox_manager_auto_create(self):
         """SandboxManager 能自动创建和管理沙箱。"""
