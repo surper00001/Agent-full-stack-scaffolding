@@ -1,5 +1,5 @@
 import { useParams, Link } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAgent } from "@/hooks";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -12,8 +12,8 @@ import {
   BarChart3, TrendingUp, AlertTriangle,
 } from "lucide-react";
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend,
   AreaChart, Area,
 } from "recharts";
 import * as obsApi from "@/api/observability";
@@ -114,7 +114,6 @@ export default function AdminAgentDetailPage() {
 
   // 计算汇总
   const totalExec = analytics?.executions ?? 0;
-  const successCount = analytics?.success_count ?? 0;
   const failureCount = analytics?.failure_count ?? 0;
   const successRate = analytics?.success_rate ?? 0;
   const avgLatency = analytics?.avg_latency_ms ?? 0;

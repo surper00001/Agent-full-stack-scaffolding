@@ -165,10 +165,10 @@ def _skill_to_tool(skill: Any) -> HarnessTool:
         version: ClassVar[str] = skill.version
         requires_sandbox: ClassVar[bool] = skill.requires_sandbox
 
-        def is_read_only(self, input: Any) -> bool:
+        def is_read_only(self, input: Any) -> bool:  # noqa: ARG002
             return skill.is_read_only
 
-        def is_concurrency_safe(self, input: Any) -> bool:
+        def is_concurrency_safe(self, input: Any) -> bool:  # noqa: ARG002
             return skill.is_concurrency_safe
 
         async def execute(self, input: Any, signal: Any) -> Any:

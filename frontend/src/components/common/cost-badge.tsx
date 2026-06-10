@@ -6,7 +6,7 @@ interface CostBadgeProps {
   size?: "sm" | "md";
 }
 
-export function CostBadge({ cost, size = "sm" }: CostBadgeProps) {
+export function CostBadge({ cost, size: _size = "sm" }: CostBadgeProps) {
   return (
     <span
       className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800"

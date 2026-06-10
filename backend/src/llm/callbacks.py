@@ -31,12 +31,12 @@ class TokenUsageCallback(BaseCallbackHandler):
         self._start_time: float = 0.0
 
     def on_llm_start(
-        self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any
+        self, serialized: dict[str, Any], prompts: list[str], **kwargs: Any  # noqa: ARG002
     ) -> None:
         self._start_time = time.monotonic()
         self.call_count += 1
 
-    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:  # noqa: ARG002
         """LLM 调用结束时统计 token 和耗时。"""
         elapsed = time.monotonic() - self._start_time
 
@@ -124,6 +124,6 @@ def build_trace_callbacks(
         if tags:
             metadata["langfuse_tags"] = tags
     except Exception:
-        logger.debug(f"构建 LangChain callbacks 时出错，使用空 callback 列表", exc_info=True)
+        logger.debug("构建 LangChain callbacks 时出错，使用空 callback 列表", exc_info=True)
 
     return callbacks, metadata

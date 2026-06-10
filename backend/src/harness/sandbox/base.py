@@ -12,18 +12,18 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class SandboxStatus(str, Enum):
+class SandboxStatus(StrEnum):
     IDLE = "idle"
     BUSY = "busy"
     FAILED = "failed"
     TERMINATED = "terminated"
 
 
-class NetworkMode(str, Enum):
+class NetworkMode(StrEnum):
     """沙箱网络模式。"""
     NONE = "none"         # 完全无网络
     INTERNAL = "internal" # 仅容器间通信

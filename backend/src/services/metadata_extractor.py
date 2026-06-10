@@ -338,7 +338,7 @@ class MetadataExtractor:
         return None
 
     @classmethod
-    def _extract_doc_type(cls, text: str, ext: str) -> str | None:
+    def _extract_doc_type(cls, text: str, ext: str) -> str | None:  # noqa: ARG003
         """推断文档类型。"""
         # 1. 参考文献格式标记 [J]/[C]/[D] 等
         markers = _REF_TYPE_MARKER.findall(text[:3000])
@@ -420,7 +420,4 @@ class MetadataExtractor:
             r"^(?:关键词|关键字|Keywords?)[：:\s]",
             r"^(?:作者|Authors?)[：:\s]",
         ]
-        for pattern in section_patterns:
-            if re.match(pattern, line, re.IGNORECASE):
-                return True
-        return False
+        return any(re.match(pattern, line, re.IGNORECASE) for pattern in section_patterns)

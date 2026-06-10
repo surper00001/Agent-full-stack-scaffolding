@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from loguru import logger
 
 
-class LayoutTag(str, Enum):
+class LayoutTag(StrEnum):
     """块的语义角色标签——对应人类阅读时的认知分类。"""
 
     TITLE = "title"            # 文档标题（最大字号）
@@ -502,7 +502,7 @@ class ReadingOrder:
         cls,
         blocks: list[dict[str, Any]],
         page_width: float,
-        page_height: float,
+        page_height: float,  # noqa: ARG003
     ) -> list[dict[str, Any]]:
         """按人类阅读顺序重新排列块。"""
         if len(blocks) <= 1:
@@ -556,7 +556,7 @@ class ReadingOrder:
         cls,
         blocks: list[dict[str, Any]],
         columns: list[tuple[float, float]],
-        page_width: float,
+        page_width: float,  # noqa: ARG003
     ) -> list[dict[str, Any]]:
         """按栏重新排列块。"""
         result: list[dict[str, Any]] = []

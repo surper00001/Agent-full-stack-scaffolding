@@ -28,7 +28,7 @@ class TokenStatsService:
         total_stmt = (
             select(func.coalesce(func.sum(Message.token_count), 0))
             .where(
-                Message.is_deleted == False,
+                not Message.is_deleted,
                 Message.created_at >= since,
             )
         )
@@ -38,7 +38,7 @@ class TokenStatsService:
         prev_stmt = (
             select(func.coalesce(func.sum(Message.token_count), 0))
             .where(
-                Message.is_deleted == False,
+                not Message.is_deleted,
                 Message.created_at >= prev_since,
                 Message.created_at < since,
             )
@@ -58,7 +58,7 @@ class TokenStatsService:
                 func.coalesce(func.sum(Message.token_count), 0).label("tokens"),
             )
             .where(
-                Message.is_deleted == False,
+                not Message.is_deleted,
                 Message.created_at >= since,
             )
             .group_by(text("date"))
@@ -81,8 +81,8 @@ class TokenStatsService:
             .select_from(Message)
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(
-                Message.is_deleted == False,
-                Conversation.is_deleted == False,
+                not Message.is_deleted,
+                not Conversation.is_deleted,
                 Message.created_at >= since,
             )
             .group_by(Conversation.agent_type)
@@ -110,8 +110,8 @@ class TokenStatsService:
             .select_from(Message)
             .join(Conversation, Conversation.id == Message.conversation_id)
             .where(
-                Message.is_deleted == False,
-                Conversation.is_deleted == False,
+                not Message.is_deleted,
+                not Conversation.is_deleted,
                 Message.created_at >= since,
             )
             .order_by(Message.created_at.desc())

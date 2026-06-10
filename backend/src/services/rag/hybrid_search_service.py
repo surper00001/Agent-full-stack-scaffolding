@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.documents import Document
@@ -253,10 +254,8 @@ class HybridSearchService:
         self._bm25_cache.pop(f"{tenant_id}:{kb_id}", None)
         # FTS5 路径：删除旧表，下次搜索时自动重建
         if self._fts_retriever is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._fts_retriever.drop_index(tenant_id, kb_id)
-            except Exception:
-                pass
 
     @staticmethod
     async def _load_chunks_by_ids(

@@ -13,6 +13,7 @@ from typing import Any
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from loguru import logger
 
 from src.core.config import get_settings
 from src.core.exceptions import VectorStoreError

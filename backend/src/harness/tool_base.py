@@ -135,7 +135,7 @@ class HarnessTool(ABC, Generic[Input, Output]):
         """工具是否当前可用（Feature Flag / 环境判断）。"""
         return True
 
-    def is_read_only(self, input: Input) -> bool:
+    def is_read_only(self, input: Input) -> bool:  # noqa: ARG002
         """是否只读。
 
         只读工具可以和其它只读工具并行执行。
@@ -143,7 +143,7 @@ class HarnessTool(ABC, Generic[Input, Output]):
         """
         return False
 
-    def is_concurrency_safe(self, input: Input) -> bool:
+    def is_concurrency_safe(self, input: Input) -> bool:  # noqa: ARG002
         """是否真正的并发安全。
 
         并发安全的工具不受限制地并行执行。
@@ -153,7 +153,7 @@ class HarnessTool(ABC, Generic[Input, Output]):
 
     # ── 生命周期 ──
 
-    def validate_input(self, input: Input) -> ValidationResult:
+    def validate_input(self, input: Input) -> ValidationResult:  # noqa: ARG002
         """
         业务级输入校验。
 
@@ -162,7 +162,7 @@ class HarnessTool(ABC, Generic[Input, Output]):
         """
         return ValidationResult.ok()
 
-    def check_permissions(self, input: Input) -> PermissionResult:
+    def check_permissions(self, input: Input) -> PermissionResult:  # noqa: ARG002
         """权限校验。默认允许。"""
         return PermissionResult(allowed=True)
 
@@ -240,7 +240,7 @@ class HarnessTool(ABC, Generic[Input, Output]):
                     return f"[权限拒绝] {perm.reason}"
                 # 执行
                 result = await cls().execute(input_obj, signal)
-                elapsed = (time.perf_counter() - start) * 1000
+                (time.perf_counter() - start) * 1000
                 return cls().render_result(result)
             except Exception as e:
                 return f"[工具执行失败] {type(e).__name__}: {e}"

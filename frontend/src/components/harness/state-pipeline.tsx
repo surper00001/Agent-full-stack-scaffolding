@@ -5,14 +5,12 @@ import {
   AlertCircle,
   Play,
   ArrowRight,
-  RotateCcw,
   Archive,
-  ShieldAlert,
   Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { SkillDetail, SkillStatus } from "./types";
+import type { SkillStatus } from "./types";
 
 // 状态机定义：每个状态的可视化配置
 const STATE_DEFS: Record<

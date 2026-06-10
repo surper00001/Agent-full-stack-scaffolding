@@ -45,10 +45,7 @@ async def upload_chat_image(
             "message": f"不支持的图片格式: {ext}，支持: {', '.join(_ALLOWED_IMAGE_EXTS)}",
         }
 
-    if ext in (".jpg", ".jpeg"):
-        mime_ext = ".jpg"
-    else:
-        mime_ext = ext
+    mime_ext = ".jpg" if ext in (".jpg", ".jpeg") else ext
 
     image_id = uuid.uuid4().hex[:12]
     user_dir = _CHAT_IMAGES_DIR / current_user.id / conversation_id

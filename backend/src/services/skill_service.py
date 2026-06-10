@@ -6,15 +6,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import NotFoundError, ValidationError
 from src.db.repository import BaseRepository
 from src.harness.skill_lifecycle import SkillLifecycle, SkillStatus
 from src.models.domain.skill import Skill
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class SkillService:
@@ -206,7 +209,7 @@ class SkillService:
             select(Skill)
             .where(
                 Skill.tenant_id == tenant_id,
-                Skill.is_deleted == False,
+                not Skill.is_deleted,
                 Skill.status.in_([SkillStatus.ACTIVE.value, SkillStatus.PUBLISHED.value]),
                 (Skill.name.ilike(f"%{query}%")) | (Skill.description.ilike(f"%{query}%")),
             )

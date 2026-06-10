@@ -10,15 +10,16 @@ Agent 服务层。
 from __future__ import annotations
 
 import json
-from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING, Any
 
 from src.agents.base import BaseAgent
 from src.core.exceptions import AgentNotFoundError
 from src.db.repository import BaseRepository
 from src.llm.factory import LLMFactory
 from src.models.domain.agent import AgentConfig
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AgentService:

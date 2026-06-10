@@ -131,7 +131,6 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
 function clientOpml(root: MindMapNode, title: string): string {
   const walk = (n: MindMapNode, indent = 2): string => {
     const p = " ".repeat(indent);
@@ -159,8 +158,6 @@ function clientFreemind(root: MindMapNode): string {
 function clientMarkdown(data: MindMap): string {
   return `# ${data.title}\n\n${data.root.children?.map((c) => nodeToMarkdown(c, 0)).join("\n") ?? ""}`;
 }
-/* eslint-enable @typescript-eslint/no-unused-vars */
-
 // ═══════════════════════════════════════════════════════════
 // 编辑弹窗
 // ═══════════════════════════════════════════════════════════

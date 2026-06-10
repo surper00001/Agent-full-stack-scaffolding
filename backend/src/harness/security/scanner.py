@@ -18,17 +18,19 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import re
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from src.harness.security.policies import SecurityPolicy
+if TYPE_CHECKING:
+    from src.harness.security.policies import SecurityPolicy
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -141,9 +143,8 @@ class CodeScanner:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     self._check_module(alias.name, node.lineno, f"import {alias.name}")
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    self._check_module(node.module, node.lineno, f"from {node.module} import ...")
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                self._check_module(node.module, node.lineno, f"from {node.module} import ...")
 
     def _check_module(self, module_name: str, lineno: int, code: str) -> None:
         """检查模块是否被允许。"""
@@ -162,7 +163,7 @@ class CodeScanner:
             return
 
         # 检查白名单
-        if self._policy.allowed_modules:
+        if self._policy.allowed_modules:  # noqa: SIM102
             if root_module not in self._policy.allowed_modules and module_name not in self._policy.allowed_imports:
                 self._findings.append(ScanFinding(
                     severity=Severity.WARNING,
@@ -293,10 +294,8 @@ class CodeScanner:
                 }
             finally:
                 import os
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(tmp)
-                except OSError:
-                    pass
         except ImportError:
             return None
         except Exception as e:

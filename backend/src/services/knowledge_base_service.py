@@ -32,11 +32,11 @@ from src.services.processing_progress import (
 # 文档处理并发控制：一次只跑一个文档，避免 MinerU + Embedding + Reranker
 # 同时争抢 CPU（即使限线程，多实例叠加也会打满）
 _doc_process_semaphore = asyncio.Semaphore(1)
-from src.services.rag.embed_text_builder import build_embed_text
-from src.services.rag.hybrid_search_service import HybridSearchService
-from src.services.rag.retrieval_pipeline import RetrievalPipeline
-from src.services.reranker_service import RerankerService, get_reranker_service
-from src.vectorstore.base import BaseVectorStore, create_vector_store
+from src.services.rag.embed_text_builder import build_embed_text  # noqa: E402
+from src.services.rag.hybrid_search_service import HybridSearchService  # noqa: E402
+from src.services.rag.retrieval_pipeline import RetrievalPipeline  # noqa: E402
+from src.services.reranker_service import RerankerService, get_reranker_service  # noqa: E402
+from src.vectorstore.base import BaseVectorStore, create_vector_store  # noqa: E402
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

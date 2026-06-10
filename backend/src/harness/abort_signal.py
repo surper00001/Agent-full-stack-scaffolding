@@ -18,7 +18,10 @@ AbortSignal — 可组合的树形取消信号。
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class AbortError(Exception):
@@ -72,7 +75,7 @@ class AbortSignal:
         self._reason = reason
         self._aborted.set()
         for cb in self._callbacks:
-            try:
+            try:  # noqa: SIM105
                 cb(reason)
             except Exception:
                 pass  # 回调异常不影响取消传播

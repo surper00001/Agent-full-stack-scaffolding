@@ -13,17 +13,17 @@ import logging
 import random
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from functools import wraps
 from typing import Any, TypeVar
 
 from tenacity import (
+    before_sleep_log,
     retry,
     retry_if_exception,
     stop_after_attempt,
     wait_exponential_jitter,
-    before_sleep_log,
 )
 
 from src.monitoring.metrics import (
@@ -221,10 +221,7 @@ def _is_retryable(exception: BaseException) -> bool:
         return True
 
     # 内建网络异常
-    if isinstance(exception, RETRYABLE_EXCEPTIONS):
-        return True
-
-    return False
+    return bool(isinstance(exception, RETRYABLE_EXCEPTIONS))
 
 
 # ── 熔断器 ──
@@ -301,8 +298,9 @@ class CircuitBreaker:
             )
             # 发送告警
             try:
-                from src.monitoring.alerting import get_alert_manager
                 import asyncio as _asyncio
+
+                from src.monitoring.alerting import get_alert_manager
                 am = get_alert_manager()
                 if am._enabled:
                     _asyncio.ensure_future(
@@ -376,7 +374,7 @@ def with_llm_resilience(
                 LLM_CALL_LATENCY.labels(model=provider).observe(elapsed)
 
                 return result
-            except Exception as e:
+            except Exception:
                 circuit.record_failure()
                 raise
 

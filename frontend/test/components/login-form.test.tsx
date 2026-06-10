@@ -109,6 +109,7 @@ describe("LoginForm", () => {
     expect(passwordInput).toHaveAttribute("type", "password");
 
     // 点击眼睛图标
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const toggleBtn = screen.getByRole("button", { name: "" });
     // 找到密码切换按钮（眼睛图标）
     const buttons = screen.getAllByRole("button");

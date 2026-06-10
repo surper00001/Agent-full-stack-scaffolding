@@ -25,8 +25,8 @@ gRPC API: http://localhost:6334
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
-from typing import Any
+import contextlib
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.documents import Document
 from loguru import logger
@@ -45,6 +45,9 @@ from qdrant_client.models import (
 from src.core.config import get_settings
 from src.core.exceptions import VectorStoreError
 from src.vectorstore.base import BaseVectorStore
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class QdrantVectorStore(BaseVectorStore):
@@ -111,10 +114,8 @@ class QdrantVectorStore(BaseVectorStore):
 
     def _reconnect_client(self) -> None:
         """关闭旧连接并重建 QdrantClient（强制新 TCP 连接绕过 Docker 代理缓存）。"""
-        try:
+        with contextlib.suppress(Exception):
             self._client.close()
-        except Exception:
-            pass
         settings = get_settings()
         self._client = QdrantClient(
             host=settings.qdrant_host,

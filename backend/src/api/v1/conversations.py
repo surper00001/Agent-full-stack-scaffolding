@@ -11,14 +11,12 @@ import asyncio
 import json
 import re
 import time as _time
-import uuid
-from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from loguru import logger
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 
 from src.agents.base import BaseAgent
 from src.agents.prompts import get_prompt_for_agent
@@ -27,8 +25,7 @@ from src.core.config import get_settings
 from src.core.exceptions import ForbiddenError
 from src.db.session import get_db_session
 from src.llm.factory import get_llm_factory
-from src.services.conversation_context_store import get_conversation_context_store
-from src.models.schemas.request import (
+from src.models.schemas.request import (  # noqa: TC001
     ChatMessageRequest,
     CreateConversationRequest,
     PaginationParams,
@@ -41,6 +38,7 @@ from src.models.schemas.response import (
     MessageItem,
     PaginatedData,
 )
+from src.services.conversation_context_store import get_conversation_context_store
 from src.services.conversation_service import ConversationService, _orm_to_langchain_all
 
 router = APIRouter(prefix="/conversations", tags=["会话管理"])
@@ -404,7 +402,6 @@ async def send_message(
 
     # 0. 处理图片附件：调用 VLM 描述图片，注入到用户消息文本中
     user_content = body.content
-    image_meta: dict[str, Any] | None = None
     if body.image_ids:
         user_id = _resolve_user_id(current_user)
         img_descriptions = await _resolve_image_descriptions(
@@ -417,7 +414,6 @@ async def send_message(
                 f"---\n\n"
                 f"用户问题: {body.content}"
             )
-        image_meta = {"image_ids": body.image_ids}
 
     # 1. 保存用户消息（带 context_store 写入 conversation_context 向量集合）
     await service_with_context.add_message_with_metadata(
@@ -790,8 +786,10 @@ def _extract_file_info(text: str) -> dict[str, Any] | None:
 
 
 # ---- 聊天图片上传（已提取到 conversations_images.py） ----
-from src.api.v1.conversations_images import (
+from src.api.v1.conversations_images import (  # noqa: E402
     resolve_image_descriptions,
+)
+from src.api.v1.conversations_images import (  # noqa: E402
     router as images_router,
 )
 
@@ -811,7 +809,7 @@ router.include_router(images_router)
 @router.post("/export-mindmap", summary="导出思维导图文件", tags=["会话管理"])
 async def export_mindmap_endpoint(
     body: dict[str, Any],
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
 ) -> dict[str, Any]:
     """将思维导图 JSON 导出为指定格式文件，返回下载 URL。
 

@@ -15,7 +15,7 @@ export function AgentTimeline({ entries, isStreaming }: AgentTimelineProps) {
       {/* Vertical line */}
       <div className="absolute left-[11px] top-2 bottom-2 w-px bg-border" />
 
-      {entries.map((entry, idx) => (
+      {entries.map((entry, _idx) => (
         <div key={entry.id} className="relative pb-3 last:pb-0">
           {/* Node dot */}
           <div

@@ -14,7 +14,7 @@ def table_to_markdown(
     """二维列表 → Markdown 表格，合并单元格内容在覆盖区域重复填充（提升检索召回）。"""
     if not table_data:
         return ""
-    nrows = len(table_data)
+    len(table_data)
     ncols = max((len(r) for r in table_data), default=0)
 
     # 构建填充矩阵：合并单元格的内容复制到被覆盖的格子

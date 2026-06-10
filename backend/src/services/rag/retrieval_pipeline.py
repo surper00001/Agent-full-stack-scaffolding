@@ -343,7 +343,7 @@ class RetrievalPipeline:
             f"[检索 Step5] 最终上下文: count={len(search_results)} "
             f"scores={[f'{s:.3f}' for s in final_scores]} "
             f"types={final_tags} "
-            f"sources={list(zip(final_sources, final_pages))}"
+            f"sources={list(zip(final_sources, final_pages, strict=False))}"
         )
 
         _timings["total"] = (time.perf_counter() - t_total_start) * 1000

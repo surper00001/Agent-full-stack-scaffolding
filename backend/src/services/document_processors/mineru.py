@@ -361,7 +361,6 @@ class MinerUParser:
                 image_caption = captions[0] if isinstance(captions, list) and captions else ""
 
                 img_bytes = None
-                ext = "png"
                 # v3 输出相对路径：images/xxx.png
                 if img_path and image_dir:
                     full_img = Path(image_dir) / Path(img_path).name
@@ -374,7 +373,7 @@ class MinerUParser:
                     if img_path:
                         try:
                             img_bytes = Path(img_path).read_bytes()
-                            ext = Path(img_path).suffix.lstrip(".") or "png"
+                            Path(img_path).suffix.lstrip(".") or "png"
                         except Exception:
                             logger.warning(f"MinerU 图片读取失败: {img_path}")
 

@@ -24,7 +24,7 @@ async def close_redis() -> None:
     """关闭 Redis 连接。"""
     global _redis
     if _redis is not None:
-        try:
+        try:  # noqa: SIM105
             await _redis.close()
         except (ConnectionResetError, RuntimeError):
             pass  # 事件循环已关闭或连接不可达

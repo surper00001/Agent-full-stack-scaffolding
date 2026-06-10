@@ -473,9 +473,9 @@ class Settings(BaseSettings):
     def _validate_secrets(self) -> Any:
         """启动时校验关键安全配置，防止使用默认值部署到生产。"""
         import secrets
+
         from loguru import logger
 
-        warnings: list[str] = []
 
         # 1. JWT 密钥校验
         jwt_val = self.jwt_secret_key.get_secret_value()

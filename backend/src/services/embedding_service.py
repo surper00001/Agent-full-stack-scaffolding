@@ -384,7 +384,7 @@ class EmbeddingBatcher:
             vectors = await service._encode(all_texts, batch_size, extra)  # noqa: SLF001
 
             # 分发给各调用方
-            for i, f in enumerate(futures):
+            for _i, f in enumerate(futures):
                 if not f.done():
                     f.set_result(vectors)
 

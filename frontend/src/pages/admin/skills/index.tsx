@@ -18,10 +18,10 @@ import {
 import { useSkillStore } from "@/stores";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { LoadingSpinner } from "@/components/common/loading-spinner";
 import { EmptyState } from "@/components/common/empty-state";
-import { getStatusLabel, getStatusColor } from "@/components/harness";
+import { getStatusColor } from "@/components/harness";
 import { STATUS_LABELS } from "@/types/skill";
 import { cn } from "@/lib/utils";
 import { useConfirm } from "@/hooks/use-confirm";

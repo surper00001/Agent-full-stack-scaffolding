@@ -16,13 +16,16 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
-class StageStatus(str, Enum):
+
+class StageStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -77,7 +80,7 @@ class StageHandler(ABC):
         """执行阶段逻辑，产出存入 context[name]。"""
         ...
 
-    def on_error(self, error: Exception, context: dict[str, Any]) -> bool:
+    def on_error(self, error: Exception, context: dict[str, Any]) -> bool:  # noqa: ARG002
         """错误处理钩子。True=继续，False=终止管道。"""
         return False
 

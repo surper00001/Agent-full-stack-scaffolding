@@ -7,7 +7,6 @@ import {
   Loader2, Download, ListChecks, FileText, Zap, MessageSquare, Brain, Workflow,
   Library, BookOpen, X, ImagePlus,
 } from "lucide-react";
-import { ThinkingCard } from "@/components/chat/thinking-card";
 import { AgentTimeline } from "@/components/chat/agent-timeline";
 import { StreamingMetrics } from "@/components/chat/streaming-metrics";
 import { ToolCallRenderer } from "@/components/chat/tool-call-renderer";
@@ -178,6 +177,7 @@ export default function ChatDetailPage() {
   const [liveToolCalls, setLiveToolCalls] = useState<ToolCall[]>([]);
   const [timelineEntries, setTimelineEntries] = useState<TimelineEntry[]>([]);
   const [streamTiming, setStreamTiming] = useState<StreamTiming | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [streamDone, setStreamDone] = useState(false);
   const [connStatus, setConnStatus] = useState<"idle" | "connected" | "reconnecting" | "disconnected" | "error">("idle");
 

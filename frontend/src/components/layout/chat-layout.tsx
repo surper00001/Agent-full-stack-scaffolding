@@ -176,6 +176,7 @@ function ChatSidebar({
         navWithKb("/chat");
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [deleteConversation, currentPath, navWithKb],
   );
 

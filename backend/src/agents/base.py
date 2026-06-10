@@ -120,8 +120,9 @@ class BaseAgent:
         _agent_logger.info(f"Agent 开始执行: type={agent_type}")
 
         # Prometheus: 记录 agent 执行计数
-        from src.monitoring.metrics import AGENT_EXECUTIONS, AGENT_EXECUTION_LATENCY
         import time as _time
+
+        from src.monitoring.metrics import AGENT_EXECUTION_LATENCY, AGENT_EXECUTIONS
         _exec_start = _time.perf_counter()
 
         raw_history = list(chat_history or [])

@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from src.services.document_processors.layout import LayoutTag
-
 if TYPE_CHECKING:
     from src.services.chunking_service import StructuredBlock
 

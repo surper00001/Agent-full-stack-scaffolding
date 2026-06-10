@@ -20,7 +20,7 @@ router = APIRouter(prefix="/admin/observability", tags=["observability"])
 
 @router.get("/overview", summary="可观测性概览")
 async def get_observability_overview(
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """获取系统可观测性概览数据（不含 mock）。"""
@@ -67,7 +67,7 @@ async def get_recent_llm_calls(
 
 @router.get("/agents", summary="Agent 分析数据")
 async def get_agent_analytics(
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """获取所有 Agent 的分析数据。"""
@@ -101,7 +101,7 @@ async def get_agent_analytics(
 @router.get("/agents/{agent_id}", summary="单个 Agent 分析")
 async def get_single_agent_analytics(
     agent_id: str,
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """获取单个 Agent 的详细分析数据。"""
@@ -148,7 +148,7 @@ async def get_latency_time_series(
 @router.get("/time-series/tokens", summary="Token 时序数据（图表用）")
 async def get_tokens_time_series(
     days: int = Query(7, ge=1, le=90, description="天数"),
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """获取按天聚合的 Token 消耗时序数据。"""
@@ -160,7 +160,7 @@ async def get_tokens_time_series(
 @router.get("/time-series/agent-executions", summary="Agent 执行统计（图表用）")
 async def get_agent_executions_time_series(
     days: int = Query(7, ge=1, le=90, description="天数"),
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     """获取按 Agent 聚合的执行统计（成功/失败/超时）。"""
@@ -173,7 +173,7 @@ async def get_agent_executions_time_series(
 async def get_agent_daily_executions(
     agent_id: str,
     days: int = Query(7, ge=1, le=90),
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     service = ObservabilityService(db)
@@ -185,7 +185,7 @@ async def get_agent_daily_executions(
 async def get_agent_daily_tokens(
     agent_id: str,
     days: int = Query(7, ge=1, le=90),
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     service = ObservabilityService(db)
@@ -197,7 +197,7 @@ async def get_agent_daily_tokens(
 async def get_agent_daily_cost(
     agent_id: str,
     days: int = Query(7, ge=1, le=90),
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     service = ObservabilityService(db)
@@ -209,7 +209,7 @@ async def get_agent_daily_cost(
 async def get_agent_recent_executions(
     agent_id: str,
     limit: int = Query(10, ge=1, le=50),
-    tenant_id: str = Depends(get_current_tenant),
+    tenant_id: str = Depends(get_current_tenant),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     service = ObservabilityService(db)

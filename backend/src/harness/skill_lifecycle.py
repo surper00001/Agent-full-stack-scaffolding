@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class SkillStatus(str, Enum):
+class SkillStatus(StrEnum):
     """Skill 生命周期状态。"""
     DRAFT = "draft"
     TESTING = "testing"

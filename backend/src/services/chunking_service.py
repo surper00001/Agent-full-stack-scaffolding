@@ -32,17 +32,41 @@ class ChunkingService:
     # ── 动态分隔符策略 — 委托给独立配置模块 ──
     from src.services.chunking.separator_strategies import (
         CATEGORY_SEPARATORS as _CATEGORY_SEPARATORS,
+    )
+    from src.services.chunking.separator_strategies import (
         CHINESE_CHAR_PATTERN as _CHINESE_CHAR_PATTERN,
+    )
+    from src.services.chunking.separator_strategies import (
         CHINESE_PUNCT as _CHINESE_PUNCT,
+    )
+    from src.services.chunking.separator_strategies import (
         CODE_BLOCK_PATTERN as _CODE_BLOCK_PATTERN,
+    )
+    from src.services.chunking.separator_strategies import (
         HEADING_PATTERN as _HEADING_PATTERN,
+    )
+    from src.services.chunking.separator_strategies import (
         LIST_PATTERN as _LIST_PATTERN,
+    )
+    from src.services.chunking.separator_strategies import (
         REGEX_SEPARATORS as _REGEX_SEPARATORS,
+    )
+    from src.services.chunking.separator_strategies import (
         SEPARATORS_ACADEMIC as _SEPARATORS_ACADEMIC,
+    )
+    from src.services.chunking.separator_strategies import (
         SEPARATORS_LEGAL as _SEPARATORS_LEGAL,
+    )
+    from src.services.chunking.separator_strategies import (
         SEPARATORS_REPORT as _SEPARATORS_REPORT,
+    )
+    from src.services.chunking.separator_strategies import (
         SEPARATORS_SEMANTIC as _SEPARATORS_SEMANTIC,
+    )
+    from src.services.chunking.separator_strategies import (
         SEPARATORS_STANDARD as _SEPARATORS_STANDARD,
+    )
+    from src.services.chunking.separator_strategies import (
         SEPARATORS_TECHNICAL as _SEPARATORS_TECHNICAL,
     )
 
@@ -689,7 +713,7 @@ class ChunkingService:
             return True
         # 极短行（<15字符）+ 后续换行 → 可能是独立标题
         first_line = stripped.split("\n")[0].strip()
-        if len(first_line) < 15 and "\n" in stripped:
+        if len(first_line) < 15 and "\n" in stripped:  # noqa: SIM102
             # 检查是否像标题（首行短 + 以大写/CJK开头）
             if re.match(r"^[A-Z一-鿿]", first_line):
                 return True
@@ -715,7 +739,7 @@ class ChunkingService:
         except ValueError:
             return False
 
-    _CN_NUMS = dict(zip("一二三四五六七八九十", range(1, 11)))
+    _CN_NUMS = dict(zip("一二三四五六七八九十", range(1, 11), strict=False))
     _ROMAN_NUMS = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5,
                    "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10}
 

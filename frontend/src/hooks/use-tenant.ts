@@ -11,6 +11,7 @@ export function useTenant() {
     if (!store.usage && !store.isLoading) {
       store.fetchUsage();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return store;

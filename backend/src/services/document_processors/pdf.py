@@ -63,14 +63,11 @@ class PDFMixin:
                 continue
 
             # 提取 Form XObject 中引用的子对象
-            import re
             # 匹配间接引用：数字 数字 R（如 "12 0 R"）
             refs = re.findall(r"(\d+)\s+\d+\s+R", obj_str)
             for kid_xref_str in refs:
-                try:
+                with contextlib.suppress(ValueError):
                     stack.append((int(kid_xref_str), depth + 1))
-                except ValueError:
-                    pass
 
         return results
 
@@ -453,7 +450,7 @@ class PDFMixin:
             # VLM 专用 prompt 提取的参考文献是末尾页的权威结果，
             # 移除末尾 3 页的所有 text 块（包括已标记为 reference 的，避免重复）
             last_page_nums = set(range(max(1, page_count - 2), page_count + 1))
-            vlm_pages_str = ", ".join(str(p) for p in sorted(last_page_nums))
+            ", ".join(str(p) for p in sorted(last_page_nums))
             removed_count = 0
             kept_blocks = []
             for b in blocks:
@@ -830,8 +827,8 @@ class PDFMixin:
                         x1 = max(t[3] for t in para)
                         y1 = max(t[4] for t in para)
                         dim = page_dimensions.get(str(page_num), {})
-                        pw = dim.get("width", x1 + 10)
-                        ph = dim.get("height", y1 + 10)
+                        dim.get("width", x1 + 10)
+                        dim.get("height", y1 + 10)
                         blocks.append(StructuredBlock(
                             block_type="text",
                             content=content,
@@ -1091,4 +1088,6 @@ def _best_font_for_block(
 # 已提取到 src/services/document_processors/formula_utils.py
 # 保留兼容别名，避免破坏现有 import 路径
 
-from src.services.document_processors.formula_utils import is_formula_block as _is_formula_block  # noqa: F401
+from src.services.document_processors.formula_utils import (  # noqa: E402
+    is_formula_block as _is_formula_block,  # noqa: F401
+)

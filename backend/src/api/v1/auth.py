@@ -148,7 +148,7 @@ async def logout(
 
 
 @router.get("/me", response_model=APIResponse[UserResponse])
-async def get_current_user(
+async def get_me(
     authorization: str = Header(description="Bearer <access_token>"),
     db: AsyncSession = Depends(get_db_session),
 ):

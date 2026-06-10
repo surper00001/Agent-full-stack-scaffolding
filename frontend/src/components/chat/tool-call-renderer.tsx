@@ -4,7 +4,7 @@ import {
   Code2, FileText, Globe, Database, Image, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { ToolCall, KBCitation } from "@/types";
+import type { ToolCall } from "@/types";
 
 interface ToolCallRendererProps {
   toolCall: ToolCall;
@@ -69,7 +69,7 @@ function renderResult(name: string, result: unknown) {
           </div>
         );
       }
-    } catch {}
+    } catch { /* ignore parse errors */ }
   }
 
   // Code execution -> show code + output
@@ -109,7 +109,7 @@ function renderResult(name: string, result: unknown) {
           </div>
         );
       }
-    } catch {}
+    } catch { /* ignore parse errors */ }
   }
 
   // Web search -> show links
@@ -153,7 +153,7 @@ function renderResult(name: string, result: unknown) {
           </div>
         );
       }
-    } catch {}
+    } catch { /* ignore parse errors */ }
   }
 
   // File operations -> show path info

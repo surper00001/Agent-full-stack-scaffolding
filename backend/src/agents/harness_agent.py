@@ -14,9 +14,7 @@ Harness Agent 是一个特殊的 Agent，专门用于：
 
 from __future__ import annotations
 
-from typing import Any
-
-from langchain_core.language_models import BaseChatModel
+from typing import TYPE_CHECKING, Any
 
 from src.agents.base import BaseAgent
 from src.agents.tools.skill_tools import (
@@ -28,6 +26,9 @@ from src.agents.tools.skill_tools import (
     TestSkillTool,
 )
 from src.harness.unified_registry import get_unified_registry
+
+if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
 
 # Harness Agent 系统提示词
 HARNESS_SYSTEM_PROMPT = """你是一个 **Harness Engineering Agent** — 专门负责为 AI 平台创建和安装新的能力 (Skill)。

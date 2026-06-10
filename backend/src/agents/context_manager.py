@@ -15,14 +15,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol
 
-from loguru import logger
-
 from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
 )
+from loguru import logger
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel

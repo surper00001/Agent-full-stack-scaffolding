@@ -12,15 +12,17 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.domain.agent import AgentConfig
 from src.models.domain.conversation import Conversation, Message
 from src.models.domain.user import User
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # ── 模型定价（美元 / 1K tokens）──
 # 用于从 token 消耗推算费用
@@ -272,14 +274,14 @@ class ObservabilityService:
         try:
             # 总用户数
             result = await self._db.execute(
-                select(func.count(User.id)).where(User.is_deleted == False)
+                select(func.count(User.id)).where(not User.is_deleted)
             )
             overview.total_requests = result.scalar() or 0
 
             # 今日注册用户
             result = await self._db.execute(
                 select(func.count(User.id)).where(
-                    User.created_at >= today, User.is_deleted == False
+                    User.created_at >= today, not User.is_deleted
                 )
             )
             overview.requests_today = result.scalar() or 0
@@ -299,26 +301,26 @@ class ObservabilityService:
 
             # Agent 统计
             result = await self._db.execute(
-                select(func.count(AgentConfig.id)).where(AgentConfig.is_deleted == False)
+                select(func.count(AgentConfig.id)).where(not AgentConfig.is_deleted)
             )
-            total_agents = result.scalar() or 0
+            result.scalar() or 0
 
             result = await self._db.execute(
                 select(func.count(AgentConfig.id)).where(
-                    AgentConfig.is_active == True, AgentConfig.is_deleted == False
+                    AgentConfig.is_active, not AgentConfig.is_deleted
                 )
             )
-            active_agents = result.scalar() or 0
+            result.scalar() or 0
 
             # 对话统计
             result = await self._db.execute(
-                select(func.count(Conversation.id)).where(Conversation.is_deleted == False)
+                select(func.count(Conversation.id)).where(not Conversation.is_deleted)
             )
-            total_convs = result.scalar() or 0
+            result.scalar() or 0
 
             result = await self._db.execute(
                 select(func.count(Conversation.id)).where(
-                    Conversation.created_at >= today, Conversation.is_deleted == False
+                    Conversation.created_at >= today, not Conversation.is_deleted
                 )
             )
             overview.agent_executions_today = result.scalar() or 0
@@ -416,7 +418,7 @@ class ObservabilityService:
         # 获取 Agent 配置
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, AgentConfig.is_deleted == False
+                AgentConfig.id == agent_id, not AgentConfig.is_deleted
             )
         )
         agent = result.scalar_one_or_none()
@@ -434,7 +436,7 @@ class ObservabilityService:
         result = await self._db.execute(
             select(func.count(Conversation.id)).where(
                 Conversation.agent_type == agent.agent_type,
-                Conversation.is_deleted == False,
+                not Conversation.is_deleted,
             )
         )
         analytics.conversation_count = result.scalar() or 0
@@ -485,7 +487,7 @@ class ObservabilityService:
     async def get_all_agent_analytics(self) -> list[AgentAnalytics]:
         """获取所有 Agent 的分析数据。"""
         result = await self._db.execute(
-            select(AgentConfig).where(AgentConfig.is_deleted == False)
+            select(AgentConfig).where(not AgentConfig.is_deleted)
         )
         agents = result.scalars().all()
 
@@ -608,7 +610,7 @@ class ObservabilityService:
                 func.coalesce(func.sum(Message.token_count), 0),
                 func.count(Message.id),
             ).where(
-                Message.is_deleted == False,
+                not Message.is_deleted,
                 Message.created_at >= cutoff,
                 Message.role == "assistant",
             ).group_by(func.date(Message.created_at)).order_by("day")
@@ -648,7 +650,7 @@ class ObservabilityService:
                 Conversation.agent_type,
                 func.count(Conversation.id),
             ).where(
-                Conversation.is_deleted == False,
+                not Conversation.is_deleted,
                 Conversation.created_at >= cutoff,
             ).group_by(
                 func.date(Conversation.created_at), Conversation.agent_type,
@@ -673,7 +675,7 @@ class ObservabilityService:
         # 先查 agent
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, AgentConfig.is_deleted == False
+                AgentConfig.id == agent_id, not AgentConfig.is_deleted
             )
         )
         agent = result.scalar_one_or_none()
@@ -690,7 +692,7 @@ class ObservabilityService:
                 func.count(Conversation.id),
             ).where(
                 Conversation.agent_type == agent.agent_type,
-                Conversation.is_deleted == False,
+                not Conversation.is_deleted,
                 Conversation.created_at >= cutoff,
             ).group_by(
                 func.date(Conversation.created_at), Conversation.status,
@@ -728,7 +730,7 @@ class ObservabilityService:
         """单个 Agent 按天 Token 消耗。"""
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, AgentConfig.is_deleted == False
+                AgentConfig.id == agent_id, not AgentConfig.is_deleted
             )
         )
         agent = result.scalar_one_or_none()
@@ -746,7 +748,7 @@ class ObservabilityService:
                 Conversation, Message.conversation_id == Conversation.id
             ).where(
                 Conversation.agent_type == agent.agent_type,
-                Message.is_deleted == False,
+                not Message.is_deleted,
                 Message.created_at >= cutoff,
             ).group_by(func.date(Message.created_at)).order_by("day")
         )
@@ -781,7 +783,7 @@ class ObservabilityService:
 
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, AgentConfig.is_deleted == False
+                AgentConfig.id == agent_id, not AgentConfig.is_deleted
             )
         )
         agent = result.scalar_one_or_none()
@@ -800,7 +802,7 @@ class ObservabilityService:
         """获取 Agent 最近执行记录。"""
         result = await self._db.execute(
             select(AgentConfig).where(
-                AgentConfig.id == agent_id, AgentConfig.is_deleted == False
+                AgentConfig.id == agent_id, not AgentConfig.is_deleted
             )
         )
         agent = result.scalar_one_or_none()
@@ -810,7 +812,7 @@ class ObservabilityService:
         result = await self._db.execute(
             select(Conversation).where(
                 Conversation.agent_type == agent.agent_type,
-                Conversation.is_deleted == False,
+                not Conversation.is_deleted,
             ).order_by(Conversation.created_at.desc()).limit(limit)
         )
         conversations = result.scalars().all()

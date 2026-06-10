@@ -19,18 +19,20 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from src.harness.abort_signal import AbortSignal
 from src.harness.tool_base import HarnessTool, ToolResult
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
-class ToolTaskStatus(str, Enum):
+
+class ToolTaskStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
@@ -130,10 +132,7 @@ class StreamingToolExecutor:
             return None
 
         # 统一转为 Pydantic 实例
-        if isinstance(tool_input, dict):
-            input_obj = tool.input_schema(**tool_input)
-        else:
-            input_obj = tool_input
+        input_obj = tool.input_schema(**tool_input) if isinstance(tool_input, dict) else tool_input
 
         # 业务校验
         validation = tool.validate_input(input_obj)
@@ -167,7 +166,7 @@ class StreamingToolExecutor:
         execute_fn: Any,  # async callable
         is_read_only: bool = False,
         is_concurrency_safe: bool = False,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,  # noqa: ARG002
     ) -> ToolTask:
         """
         提交非 HarnessTool 的原始执行任务（LangChain tool 降级路径）。
@@ -210,6 +209,7 @@ class StreamingToolExecutor:
                 如果底层工具是纯函数（非 HarnessTool），则无法做权限控制。
                 """
                 from loguru import logger
+
                 from src.harness.tool_base import PermissionResult
                 logger.debug(
                     f"RawToolAdapter 权限检查: tool={tool_name}, "

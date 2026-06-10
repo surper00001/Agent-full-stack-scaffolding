@@ -46,7 +46,7 @@ async def list_skills(
     status: str | None = Query(default=None, description="按状态过滤"),
     category: str | None = Query(default=None, description="按分类过滤"),
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[PaginatedData[SkillItem]]:
     service = SkillService(db)
@@ -74,7 +74,7 @@ async def list_skills(
 async def create_skill(
     body: SkillCreateRequest,
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     _admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[SkillDetail]:
@@ -102,7 +102,7 @@ async def create_skill(
 async def get_skill(
     skill_id: str,
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[SkillDetail]:
     _validate_skill_id(skill_id)
@@ -146,7 +146,7 @@ async def test_skill(
     skill_id: str,
     body: SkillTestRequest,
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[SkillTestResult]:
     _validate_skill_id(skill_id)
@@ -244,7 +244,7 @@ async def generate_skill(
     skill_id: str,
     body: SkillGenerateRequest,
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[SkillGenerateResult]:
     _validate_skill_id(skill_id)

@@ -318,7 +318,7 @@ _HARNESS_CATEGORY_MAP: dict[str, str] = {
 }
 
 
-def _normalize_category(raw_category: str, tool_name: str) -> str:
+def _normalize_category(raw_category: str, tool_name: str) -> str:  # noqa: ARG001
     """将 HarnessTool 原生分类标准化为统一分类体系。"""
     if raw_category in _HARNESS_CATEGORY_MAP:
         return _HARNESS_CATEGORY_MAP[raw_category]

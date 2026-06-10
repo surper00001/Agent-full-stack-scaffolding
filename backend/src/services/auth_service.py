@@ -38,7 +38,7 @@ class AuthService:
 
     # ---- 验证码 ----
 
-    async def send_verification_code(self, target: str, method: str = "email") -> str:
+    async def send_verification_code(self, target: str, method: str = "email") -> str:  # noqa: ARG002
         """发送验证码，返回生成的验证码（开发环境可返回，生产环境通过 SMS/邮件发送）。"""
         settings = get_settings()
 
@@ -52,7 +52,7 @@ class AuthService:
 
         return code
 
-    async def _verify_code(self, target: str, method: str, code: str) -> bool:
+    async def _verify_code(self, target: str, method: str, code: str) -> bool:  # noqa: ARG002
         """验证验证码是否有效 — 优先匹配 captcha，其次 send-code。"""
         settings = get_settings()
         redis = await get_redis()
@@ -119,7 +119,7 @@ class AuthService:
 
     async def login(self, account: str, password: str, code: str | None = None) -> dict:
         """用户登录：先验图形验证码 → 再验凭证 → 签发双 Token。"""
-        if code:
+        if code:  # noqa: SIM102
             if not await self._verify_code(account, "captcha", code):
                 logger.warning(f"登录失败（验证码错误）: account={account}")
                 raise InvalidVerificationCodeError()

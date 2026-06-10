@@ -101,19 +101,19 @@ def _wire_pool_metrics() -> None:
             pass  # 指标更新失败不应影响业务
 
     @sqlalchemy.event.listens_for(pool, "checkout")
-    def _on_checkout(dbapi_conn, conn_record, conn_proxy):
+    def _on_checkout(dbapi_conn, conn_record, conn_proxy):  # noqa: ARG001
         _update_pool_gauges(pool)
 
     @sqlalchemy.event.listens_for(pool, "checkin")
-    def _on_checkin(dbapi_conn, conn_record):
+    def _on_checkin(dbapi_conn, conn_record):  # noqa: ARG001
         _update_pool_gauges(pool)
 
     @sqlalchemy.event.listens_for(pool, "connect")
-    def _on_connect(dbapi_conn, conn_record):
+    def _on_connect(dbapi_conn, conn_record):  # noqa: ARG001
         _update_pool_gauges(pool)
 
     @sqlalchemy.event.listens_for(pool, "close")
-    def _on_close(dbapi_conn, conn_record):
+    def _on_close(dbapi_conn, conn_record):  # noqa: ARG001
         _update_pool_gauges(pool)
 
     # 初始化值
@@ -147,7 +147,7 @@ async def close_db_engine() -> None:
     """
     import asyncio
 
-    try:
+    try:  # noqa: SIM105
         await asyncio.wait_for(_engine.dispose(), timeout=5)
     except (TimeoutError, RuntimeError, ConnectionResetError):
         pass  # 事件循环正在关闭或连接已不可达，忽略

@@ -11,7 +11,6 @@ Conversation Context Store — 对话上下文向量存储。
 from __future__ import annotations
 
 import hashlib
-import json
 from typing import Any
 
 from langchain_core.documents import Document
@@ -176,7 +175,7 @@ class ConversationContextStore:
         query: str,
         tenant_id: str = "default",
         top_k: int = 5,
-        conversation_id: str | None = None,
+        conversation_id: str | None = None,  # noqa: ARG002
     ) -> list[Document]:
         """
         搜索与查询最相关的历史消息。

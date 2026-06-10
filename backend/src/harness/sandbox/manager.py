@@ -12,10 +12,9 @@ Sandbox Manager — 沙箱池管理器。
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -28,6 +27,9 @@ from src.harness.sandbox.base import (
 )
 from src.harness.sandbox.process_sandbox import ProcessSandbox
 from src.harness.sandbox.wsl_docker_sandbox import WSLDockerSandbox
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 @dataclass
@@ -98,10 +100,8 @@ class SandboxManager:
 
         if self._health_task:
             self._health_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._health_task
-            except asyncio.CancelledError:
-                pass
 
         for sandbox in self._pool:
             try:

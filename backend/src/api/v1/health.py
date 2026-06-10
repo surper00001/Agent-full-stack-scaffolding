@@ -109,8 +109,9 @@ def _check_disk() -> dict[str, Any]:
 async def _check_llm() -> dict[str, Any]:
     """检查 LLM 提供商连通性（轻量测试调用）。"""
     try:
-        from src.llm.factory import get_llm_factory
         from langchain_core.messages import HumanMessage
+
+        from src.llm.factory import get_llm_factory
 
         factory = get_llm_factory()
         llm = factory.create_chat_model()
@@ -119,7 +120,7 @@ async def _check_llm() -> dict[str, Any]:
 
         import time as _time
         start = _time.perf_counter()
-        resp = await llm.ainvoke([HumanMessage(content="ping")], max_tokens=1)
+        await llm.ainvoke([HumanMessage(content="ping")], max_tokens=1)
         latency = round((_time.perf_counter() - start) * 1000, 2)
 
         return {

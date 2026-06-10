@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import type { Conversation } from "@/types";
 import * as conversationsApi from "@/api/conversations";
 import { useConversationStore } from "@/stores/conversation-store";
 

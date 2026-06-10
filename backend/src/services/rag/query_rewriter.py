@@ -66,9 +66,7 @@ def should_rewrite(query: str) -> bool:
         return False
     if len(query) >= settings.kb_query_rewrite_min_chars:
         return False
-    if _looks_already_rewritten(query):
-        return False
-    return True
+    return not _looks_already_rewritten(query)
 
 
 async def rewrite_query(query: str) -> str:

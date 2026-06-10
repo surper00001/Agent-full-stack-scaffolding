@@ -16,7 +16,7 @@ router = APIRouter(prefix="/tenant", tags=["租户"])
 async def get_tenant(
     request: Request,
     _admin: CurrentUser = Depends(require_admin),
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session),  # noqa: ARG001
 ):
     """获取当前租户信息（仅管理员）。"""
     tenant_id = getattr(request.state, "tenant_id", "default")
@@ -28,7 +28,7 @@ async def get_tenant(
 
 @router.get("/usage", response_model=APIResponse[TokenUsageResponse])
 async def get_token_usage(
-    request: Request,
+    request: Request,  # noqa: ARG001
     days: int = Query(default=30, ge=1, le=365, description="统计天数"),
     _admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),

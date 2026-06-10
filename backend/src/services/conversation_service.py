@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import (
     AIMessage,
@@ -18,13 +19,18 @@ from langchain_core.messages import (
 )
 from loguru import logger
 from sqlalchemy import and_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.context_manager import ContextConfig, ContextManager, ContextStrategy, TokenCounter
 from src.core.exceptions import ConversationNotFoundError
 from src.db.repository import BaseRepository
 from src.models.domain.conversation import Conversation, Message
-from src.services.conversation_context_store import ConversationContextStore, get_conversation_context_store
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.services.conversation_context_store import (
+        ConversationContextStore,
+    )
 
 
 def _orm_to_langchain_all(messages: list[Message]) -> list[BaseMessage]:
@@ -40,10 +46,8 @@ def _orm_to_langchain_all(messages: list[Message]) -> list[BaseMessage]:
         elif m.role == "tool":
             meta = {}
             if m.metadata_:
-                try:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
                     meta = json.loads(m.metadata_)
-                except (json.JSONDecodeError, TypeError):
-                    pass
             lc_messages.append(
                 ToolMessage(
                     content=m.content,
@@ -257,7 +261,7 @@ class ConversationService:
             (messages, next_cursor) — next_cursor 为 None 表示无更多数据
         """
         conditions = [
-            Message.is_deleted == False,
+            not Message.is_deleted,
             Message.tenant_id == tenant_id,
             Message.conversation_id == conversation_id,
         ]

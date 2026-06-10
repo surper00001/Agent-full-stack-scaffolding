@@ -64,10 +64,17 @@ export default [
         SVGSVGElement: "readonly",
         SVGElement: "readonly",
         MutationObserver: "readonly",
+        ResizeObserver: "readonly",
         Blob: "readonly",
         URL: "readonly",
         KeyboardEvent: "readonly",
         ChangeEvent: "readonly",
+        MediaQueryListEvent: "readonly",
+        DOMException: "readonly",
+        Node: "readonly",
+        __dirname: "readonly",
+        require: "readonly",
+        module: "readonly",
       },
     },
     plugins: {
@@ -80,7 +87,7 @@ export default [
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": [
         "warn",
-        { allowConstantExport: true },
+        { allowConstantExport: true, allowExportNames: ["buttonVariants", "useConfirm", "getStatusLabel", "getStatusColor", "parseCitationsFromArray", "parseKBCitations", "getSkillStateConfig"] },
       ],
       "@typescript-eslint/no-unused-vars": [
         "error",

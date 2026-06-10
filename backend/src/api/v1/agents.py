@@ -25,7 +25,7 @@ router = APIRouter(prefix="/agents", tags=["Agent 管理"])
 async def create_agent(
     body: CreateAgentRequest,
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     _admin: CurrentUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[AgentConfigItem]:
@@ -48,7 +48,7 @@ async def create_agent(
 async def list_agents(
     pagination: PaginationParams = Depends(),
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[PaginatedData[AgentConfigItem]]:
     """获取当前租户的 Agent 配置列表（所有认证用户可查看）。"""
@@ -73,7 +73,7 @@ async def list_agents(
 async def get_agent(
     agent_id: str,
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse[AgentConfigItem]:
     """获取指定 Agent 的配置详情（所有认证用户可查看）。"""
@@ -115,7 +115,7 @@ async def run_agent(
     agent_id: str,
     user_input: str,
     tenant_id: str = Depends(get_current_tenant),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(get_current_user),  # noqa: ARG001
     db: AsyncSession = Depends(get_db_session),
 ) -> APIResponse:
     """

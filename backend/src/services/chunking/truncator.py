@@ -8,7 +8,6 @@ Content Truncator — 内容截断工具。
 """
 
 import re
-from typing import ClassVar
 
 # 内容上限常量
 HARD_CONTENT_MAX_CHARS = 5000

@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_tenant, get_db_session
-from src.models.domain.conversation import Message, Conversation
+from src.models.domain.conversation import Conversation, Message
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 

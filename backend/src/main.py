@@ -170,7 +170,7 @@ def create_app() -> FastAPI:
 
     # ---- 异常处理 ----
     @app.exception_handler(AppException)
-    async def app_exception_handler(request: Request, exc: AppException):
+    async def app_exception_handler(request: Request, exc: AppException):  # noqa: ARG001
         """统一业务异常处理。"""
         return JSONResponse(
             status_code=exc.status_code,
@@ -183,7 +183,7 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(Exception)
-    async def general_exception_handler(request: Request, exc: Exception):
+    async def general_exception_handler(request: Request, exc: Exception):  # noqa: ARG001
         """兜底异常处理，避免内部错误暴露给客户端。"""
         from loguru import logger
 
